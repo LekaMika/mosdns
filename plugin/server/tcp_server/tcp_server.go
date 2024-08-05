@@ -91,6 +91,9 @@ func StartServer(bp *coremain.BP, args *Args) (*TcpServer, error) {
 	if strings.HasPrefix(args.Listen, "@") {
 		listenerNetwork = "unix"
 	}
+	if strings.HasPrefix(args.Listen, "/") {
+		listenerNetwork = "unix"
+	}
 	l, err := lc.Listen(context.Background(), listenerNetwork, args.Listen)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen socket, %w", err)

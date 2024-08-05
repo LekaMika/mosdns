@@ -24,6 +24,8 @@ import (
 	// data provider
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/data_provider/domain_set"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/data_provider/ip_set"
+	_ "github.com/IrineSistiana/mosdns/v5/plugin/data_provider/v2ray_geoip"
+	_ "github.com/IrineSistiana/mosdns/v5/plugin/data_provider/v2ray_geosite"
 
 	// matcher
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/matcher/client_ip"

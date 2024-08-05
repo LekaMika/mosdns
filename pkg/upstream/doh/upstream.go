@@ -50,14 +50,14 @@ type Upstream struct {
 	reqTemplate *http.Request
 }
 
-func NewUpstream(endPoint string, rt http.RoundTripper, logger *zap.Logger) (*Upstream, error) {
+func NewUpstream(endPoint string, ua string, rt http.RoundTripper, logger *zap.Logger) (*Upstream, error) {
 	req, err := http.NewRequest(http.MethodGet, endPoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse http request, %w", err)
 	}
 
 	req.Header["Accept"] = []string{"application/dns-message"}
-	req.Header["User-Agent"] = nil // Don't let go http send a default user agent header.
+	req.Header["User-Agent"] = []string{ua} // Don't let go http send a default user agent header.
 
 	if logger == nil {
 		logger = nopLogger

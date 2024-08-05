@@ -122,3 +122,14 @@ func LoadFile(f string, m *domain.MixMatcher[struct{}]) error {
 	}
 	return nil
 }
+
+type MatcherGroup []domain.Matcher[struct{}]
+
+func (mg MatcherGroup) Match(s string) (struct{}, bool) {
+	for _, m := range mg {
+		if _, ok := m.Match(s); ok {
+			return struct{}{}, true
+		}
+	}
+	return struct{}{}, false
+}

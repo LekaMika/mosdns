@@ -60,6 +60,7 @@ type Args struct {
 	BindToDevice string `yaml:"bind_to_device"`
 	Bootstrap    string `yaml:"bootstrap"`
 	BootstrapVer int    `yaml:"bootstrap_version"`
+	UserAgent    string `yaml:"user_agent"`
 }
 
 type UpstreamConfig struct {
@@ -80,6 +81,7 @@ type UpstreamConfig struct {
 	BindToDevice string `yaml:"bind_to_device"`
 	Bootstrap    string `yaml:"bootstrap"`
 	BootstrapVer int    `yaml:"bootstrap_version"`
+	UserAgent    string `yaml:"user_agent"`
 }
 
 func Init(bp *coremain.BP, args any) (any, error) {
@@ -157,6 +159,7 @@ func NewForward(args *Args, opt Opts) (*Forward, error) {
 			},
 			Logger:        opt.Logger,
 			EventObserver: uw,
+			UserAgent:     c.UserAgent,
 		}
 
 		u, err := upstream.NewUpstream(c.Addr, uOpt)

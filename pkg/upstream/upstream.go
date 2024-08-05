@@ -24,6 +24,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"github.com/quic-go/quic-go"
 	"io"
 	"net"
 	"net/http"
@@ -39,7 +40,6 @@ import (
 	"github.com/IrineSistiana/mosdns/v5/pkg/upstream/doh"
 	"github.com/IrineSistiana/mosdns/v5/pkg/upstream/transport"
 	"github.com/IrineSistiana/mosdns/v5/pkg/utils"
-	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"go.uber.org/zap"
 	"golang.org/x/net/http2"
@@ -119,6 +119,8 @@ type Opt struct {
 	// EventObserver can observe connection events.
 	// Not implemented for quic based protocol (DoH3, DoQ).
 	EventObserver EventObserver
+
+	UserAgent string
 }
 
 // NewUpstream creates a upstream.
@@ -430,7 +432,7 @@ func NewUpstream(addr string, opt Opt) (_ Upstream, err error) {
 			addonCloser = quicTransport
 			t = &http3.RoundTripper{
 				TLSClientConfig: opt.TLSConfig,
-				QuicConfig:      quicConfig,
+				QUICConfig:      quicConfig,
 				Dial: func(ctx context.Context, _ string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
 					ua, err := udpBootstrap(ctx)
 					if err != nil {
@@ -471,7 +473,7 @@ func NewUpstream(addr string, opt Opt) (_ Upstream, err error) {
 			t = t1
 		}
 
-		u, err := doh.NewUpstream(addrURL.String(), t, opt.Logger)
+		u, err := doh.NewUpstream(addrURL.String(), opt.UserAgent, t, opt.Logger)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create doh upstream, %w", err)
 		}
