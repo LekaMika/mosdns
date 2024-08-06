@@ -543,7 +543,7 @@ func NewUpstream(addr string, opt Opt) (_ Upstream, err error) {
 				ec.CloseWithError(0, "")
 				return nil, err
 			case <-ec.HandshakeComplete():
-				c = ec.NextConnection()
+				c, _ = ec.NextConnection(ctx)
 			}
 			return transport.NewQuicDnsConn(c), nil
 		}

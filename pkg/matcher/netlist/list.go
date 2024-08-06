@@ -65,6 +65,13 @@ func (list *List) Append(newNet ...netip.Prefix) {
 	list.sorted = false
 }
 
+func (list *List) AppendList(xlist *List) {
+	for _, xe := range xlist.e {
+		list.e = append(list.e, xe)
+	}
+	list.sorted = false
+}
+
 // Sort sorts the list, this must be called after
 // list being modified and before calling List.Contains().
 func (list *List) Sort() {
