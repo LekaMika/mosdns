@@ -20,14 +20,15 @@
 package geoip
 
 import (
+	"errors"
 	"fmt"
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/geofile"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/netlist"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider/ip_set"
-	"github.com/xtls/xray-core/common/errors"
 	"net/netip"
+	"runtime/debug"
 	"strings"
 )
 
@@ -90,34 +91,26 @@ func NewV2rayGeoip(bp *coremain.BP, args *Args) (*V2rayGeoip, error) {
 
 func LoadFile(file string, code string, l *netlist.List) error {
 	if len(file) > 0 {
-		key := file + ":" + code
-		ipList := geofile.IpStringCache[key]
-		if ipList != nil {
-			l.AppendList(ipList)
-		} else {
-			cidrs, err := geofile.LoadIP(file, code)
+		cidrs, err := geofile.LoadIP(file, code)
+		if err != nil {
+			return err
+		}
+		if cidrs == nil || len(cidrs) == 0 {
+			return errors.New(code + " not found in " + file)
+		}
+		for i, cidr := range cidrs {
+			ip, ok := netip.AddrFromSlice(cidr.Ip)
+			if !ok {
+				return fmt.Errorf("invalid ip at index #%d, %s", i, cidr.Ip)
+			}
+			prefix, err := ip.Prefix(int(cidr.Prefix))
 			if err != nil {
-				return err
+				return fmt.Errorf("invalid prefix at index #%d, %w", i, err)
 			}
-			if cidrs == nil || len(cidrs) == 0 {
-				return errors.New(code + " not found in " + file)
-			}
-			tmpList := netlist.NewList()
-			for i, cidr := range cidrs {
-				ip, ok := netip.AddrFromSlice(cidr.Ip)
-				if !ok {
-					return fmt.Errorf("invalid ip at index #%d, %s", i, cidr.Ip)
-				}
-				prefix, err := ip.Prefix(int(cidr.Prefix))
-				if err != nil {
-					return fmt.Errorf("invalid prefix at index #%d, %w", i, err)
-				}
-				tmpList.Append(prefix)
-			}
-			l.AppendList(tmpList)
-			geofile.IpStringCache[key] = tmpList
+			l.Append(prefix)
 		}
 	}
+	defer debug.FreeOSMemory()
 	return nil
 }
 

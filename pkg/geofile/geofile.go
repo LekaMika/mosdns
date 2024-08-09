@@ -5,7 +5,6 @@ https://github.com/XTLS/Xray-core/blob/main/infra/conf/router.go
 package geofile
 
 import (
-	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/netlist"
 	"github.com/xtls/xray-core/app/router"
 	"github.com/xtls/xray-core/common/buf"
 	"google.golang.org/protobuf/proto"
@@ -15,67 +14,39 @@ import (
 	"strings"
 )
 
-var (
-	FileCache = make(map[string][]byte)
-	IPCache   = make(map[string]*router.GeoIP)
-	SiteCache = make(map[string]*router.GeoSite)
-
-	IpStringCache   = make(map[string]*netlist.List)
-	SiteStringCache = make(map[string][]string)
-)
-
-func Release() {
-	FileCache = make(map[string][]byte)
-	IPCache = make(map[string]*router.GeoIP)
-	SiteCache = make(map[string]*router.GeoSite)
-
-	IpStringCache = make(map[string]*netlist.List)
-	SiteStringCache = make(map[string][]string)
-	defer debug.FreeOSMemory()
-}
-
 func LoadIP(file, code string) ([]*router.CIDR, error) {
-	key := file + ":" + code
-	if IPCache[key] == nil {
-		bs, err := readAsset(file)
-		if err != nil {
-			return nil, err
-		}
-		bs = find(bs, []byte(strings.ToUpper(code)))
-		if bs == nil {
-			return nil, err
-		}
-		var geoip router.GeoIP
-		if err := proto.Unmarshal(bs, &geoip); err != nil {
-			return nil, err
-		}
-		defer debug.FreeOSMemory()
-		IPCache[key] = &geoip
-		return geoip.Cidr, nil // do not cache geoip
+	bs, err := readAsset(file)
+	if err != nil {
+		return nil, err
 	}
-	return IPCache[key].Cidr, nil
+	bs = find(bs, []byte(strings.ToUpper(code)))
+	if bs == nil {
+		return nil, err
+	}
+	var geoip router.GeoIP
+	if err := proto.Unmarshal(bs, &geoip); err != nil {
+		return nil, err
+	}
+	defer debug.FreeOSMemory()
+	return geoip.Cidr, nil
 }
 
 func LoadSite(file, code string) ([]*router.Domain, error) {
-	key := file + ":" + code
-	if SiteCache[key] == nil {
-		bs, err := readAsset(file)
-		if err != nil {
-			return nil, err
-		}
-		bs = find(bs, []byte(strings.ToUpper(code)))
-		if bs == nil {
-			return nil, err
-		}
-		var geosite router.GeoSite
-		if err := proto.Unmarshal(bs, &geosite); err != nil {
-			return nil, err
-		}
-		defer debug.FreeOSMemory()
-		SiteCache[key] = &geosite
-		return geosite.Domain, nil // do not cache geosite
+	//bs, err := readAsset(file)
+	bs, err := readAssetByCache(file)
+	if err != nil {
+		return nil, err
 	}
-	return SiteCache[key].Domain, nil
+	bs = find(bs, []byte(strings.ToUpper(code)))
+	if bs == nil {
+		return nil, err
+	}
+	var geosite router.GeoSite
+	if err := proto.Unmarshal(bs, &geosite); err != nil {
+		return nil, err
+	}
+	defer debug.FreeOSMemory()
+	return geosite.Domain, nil
 }
 
 type fileReaderFunc func(path string) (io.ReadCloser, error)
@@ -95,15 +66,10 @@ func readFile(path string) ([]byte, error) {
 }
 
 func readAsset(file string) ([]byte, error) {
-	cache := FileCache[file]
-	if cache != nil {
-		return cache, nil
-	}
 	bytes, err := readFile(file)
 	if err != nil {
 		return nil, err
 	}
-	FileCache[file] = bytes
 	return bytes, err
 }
 
