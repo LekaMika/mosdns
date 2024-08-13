@@ -21,16 +21,15 @@ package redis_cache
 
 import (
 	"fmt"
-	"log"
-	"time"
-
 	json "github.com/bytedance/sonic"
-
+	"github.com/bytedance/sonic/ast"
 	"github.com/miekg/dns"
-	"github.com/savaki/jq"
+	"time"
 )
 
-func stringToRR(rawJSON []byte, rtype uint16) (rr dns.RR, err error) {
+const layout = "2006-01-02T15:04:05.999999999Z07:00"
+
+func stringToRR(rtype uint16) (rr dns.RR, err error) {
 	switch rtype {
 	case dns.TypeNone:
 		rr = &dns.NULL{}
@@ -180,140 +179,73 @@ func stringToRR(rawJSON []byte, rtype uint16) (rr dns.RR, err error) {
 		rr = &dns.CAA{}
 	case dns.TypeAVC:
 		rr = &dns.AVC{}
-
 	default:
-		return nil, fmt.Errorf("unknown rtype %d", rtype)
-	}
-
-	err = json.Unmarshal(rawJSON, &rr)
-	return
-}
-
-type trimmedHdr struct {
-	Rrtype uint16 `json:"Rrtype"`
-}
-type trimmedJSON struct {
-	Answer []struct {
-		Hdr trimmedHdr `json:"Hdr"`
-	} `json:"Answer"`
-	Ns []struct {
-		Hdr trimmedHdr `json:"Hdr"`
-	} `json:"Ns"`
-	Extra []struct {
-		Hdr trimmedHdr `json:"Hdr"`
-	} `json:"Extra"`
-}
-
-type itemJson struct {
-	Resp           trimmedJSON `json:"Resp"`
-	StoredTime     *time.Time
-	ExpirationTime *time.Time
-}
-
-func UnmarshalDNS(rawBytes []byte) (msg dns.Msg) {
-
-	if err := json.Unmarshal([]byte(rawBytes), &msg); err != nil {
-		// an error message is expected here since Answer, Ns and Extra are interfaces and it fails to unmarshal them
-		msg.Answer = []dns.RR{}
-		msg.Ns = []dns.RR{}
-		msg.Extra = []dns.RR{}
-	}
-	// trimmed JSON is used to grab the RRtypes out of the raw message
-	trimmed := trimmedJSON{}
-	if err := json.Unmarshal([]byte(rawBytes), &trimmed); err != nil {
-		log.Println(err)
-	}
-
-	for i, rr := range trimmed.Answer {
-		query, _ := jq.Parse(fmt.Sprintf(".Answer.[%d]", i))
-		if iter, err := query.Apply([]byte(rawBytes)); err != nil {
-			log.Println(err)
-		} else {
-			if rr, err := stringToRR(iter, rr.Hdr.Rrtype); err != nil {
-				log.Println(err)
-			} else {
-				msg.Answer = append(msg.Answer, rr)
-			}
-		}
-	}
-	for i, rr := range trimmed.Ns {
-		query, _ := jq.Parse(fmt.Sprintf(".Ns.[%d]", i))
-		if iter, err := query.Apply([]byte(rawBytes)); err != nil {
-			log.Println(err)
-		} else {
-			if rr, err := stringToRR(iter, rr.Hdr.Rrtype); err != nil {
-				log.Println(err)
-			} else {
-				msg.Ns = append(msg.Ns, rr)
-			}
-		}
-	}
-	for i, rr := range trimmed.Extra {
-		query, _ := jq.Parse(fmt.Sprintf(".Extra.[%d]", i))
-		if iter, err := query.Apply([]byte(rawBytes)); err != nil {
-			log.Println(err)
-		} else {
-			if rr, err := stringToRR(iter, rr.Hdr.Rrtype); err != nil {
-				log.Println(err)
-			} else {
-				msg.Extra = append(msg.Extra, rr)
-			}
-		}
+		err = fmt.Errorf("unknown rtype %d", rtype)
+		return
 	}
 	return
 }
 
-func UnmarshalDNSItem(rawBytes []byte) (item Item) {
+func unmarshalDNS(rawBytes []byte) *dns.Msg {
 
-	if err := json.Unmarshal([]byte(rawBytes), &item); err != nil {
-		// an error message is expected here since Answer, Ns and Extra are interfaces and it fails to unmarshal them
-		item.Resp.Answer = []dns.RR{}
-		item.Resp.Ns = []dns.RR{}
-		item.Resp.Extra = []dns.RR{}
-	}
-	// trimmed JSON is used to grab the RRtypes out of the raw message
-	trimmed := itemJson{}
-	if err := json.Unmarshal(rawBytes, &trimmed); err != nil {
-		log.Println(err)
-	}
-	item.StoredTime = *trimmed.StoredTime
-	item.ExpirationTime = *trimmed.ExpirationTime
+	msg := &dns.Msg{}
+	root, _ := json.Get(rawBytes)
+	resolve(root, msg)
+	return msg
+}
 
-	for i, rr := range trimmed.Resp.Answer {
-		query, _ := jq.Parse(fmt.Sprintf(".Resp.Answer.[%d]", i))
-		if iter, err := query.Apply(rawBytes); err != nil {
-			log.Println(err)
-		} else {
-			if rr, err := stringToRR(iter, rr.Hdr.Rrtype); err != nil {
-				log.Println(err)
-			} else {
-				item.Resp.Answer = append(item.Resp.Answer, rr)
-			}
-		}
-	}
-	for i, rr := range trimmed.Resp.Ns {
-		query, _ := jq.Parse(fmt.Sprintf(".Resp.Ns.[%d]", i))
-		if iter, err := query.Apply(rawBytes); err != nil {
-			log.Println(err)
-		} else {
-			if rr, err := stringToRR(iter, rr.Hdr.Rrtype); err != nil {
-				log.Println(err)
-			} else {
-				item.Resp.Ns = append(item.Resp.Ns, rr)
-			}
-		}
-	}
-	for i, rr := range trimmed.Resp.Extra {
-		query, _ := jq.Parse(fmt.Sprintf(".Resp.Extra.[%d]", i))
-		if iter, err := query.Apply(rawBytes); err != nil {
-			log.Println(err)
-		} else {
-			if rr, err := stringToRR(iter, rr.Hdr.Rrtype); err != nil {
-				log.Println(err)
-			} else {
-				item.Resp.Extra = append(item.Resp.Extra, rr)
-			}
-		}
-	}
+func unmarshalDNSItemFromJson(rawBytes []byte) *Item {
+
+	root, _ := json.Get(rawBytes)
+	storedTimeStr, _ := root.Get("StoredTime").String()
+	expirationTimeStr, _ := root.Get("ExpirationTime").String()
+	storedTime, _ := time.Parse(layout, storedTimeStr)
+	expirationTime, _ := time.Parse(layout, expirationTimeStr)
+
+	item := Item{}
+	item.Resp = &dns.Msg{}
+	item.StoredTime = storedTime
+	item.ExpirationTime = expirationTime
+
+	resp := root.GetByPath("Resp")
+	resolve(*resp, item.Resp)
+	return &item
+}
+
+func marshalDNSItemToJson(item Item) (r []byte) {
+
+	r, _ = json.Marshal(item)
 	return
+}
+
+func resolve(root ast.Node, msg *dns.Msg) {
+	// Answer
+	if nodes, err := root.GetByPath("Answer").ArrayUseNode(); err == nil {
+		for _, node := range nodes {
+			msg.Answer = resolveNode(&node, msg.Answer)
+		}
+	}
+	root.GetByPath("Extra").ForEach(func(path ast.Sequence, node *ast.Node) bool {
+		return true
+	})
+	// Ns
+	if nodes, err := root.GetByPath("Ns").ArrayUseNode(); err == nil {
+		for _, node := range nodes {
+			msg.Ns = resolveNode(&node, msg.Ns)
+		}
+	}
+	// Extra
+	if nodes, err := root.GetByPath("Extra").ArrayUseNode(); err == nil {
+		for _, node := range nodes {
+			msg.Extra = resolveNode(&node, msg.Extra)
+		}
+	}
+}
+
+func resolveNode(node *ast.Node, result []dns.RR) []dns.RR {
+	rrtype, _ := node.GetByPath("Hdr", "Rrtype").Int64()
+	rr, _ := stringToRR(uint16(rrtype))
+	marshal, _ := node.MarshalJSON()
+	_ = json.Unmarshal(marshal, rr)
+	return append(result, rr)
 }

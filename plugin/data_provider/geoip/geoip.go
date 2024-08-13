@@ -20,7 +20,6 @@
 package geoip
 
 import (
-	"errors"
 	"fmt"
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/geofile"
@@ -44,6 +43,10 @@ func Init(bp *coremain.BP, args any) (any, error) {
 		return nil, err
 	}
 	return m, nil
+}
+
+func (geoip V2rayGeoip) CleanUp() {
+	geofile.CleanUp()
 }
 
 type Args struct {
@@ -96,7 +99,7 @@ func LoadFile(file string, code string, l *netlist.List) error {
 			return err
 		}
 		if cidrs == nil || len(cidrs) == 0 {
-			return errors.New(code + " not found in " + file)
+			return fmt.Errorf(code + " not found in " + file)
 		}
 		for i, cidr := range cidrs {
 			ip, ok := netip.AddrFromSlice(cidr.Ip)

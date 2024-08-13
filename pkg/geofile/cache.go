@@ -34,7 +34,7 @@ var (
 	SiteStringCache = make(map[string][]string)
 )
 
-func Release() {
+func CleanUp() {
 	fileCache = make(map[string][]byte)
 	IPCache = make(map[string]*router.GeoIP)
 	SiteCache = make(map[string]*router.GeoSite)

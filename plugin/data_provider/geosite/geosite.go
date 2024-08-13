@@ -20,7 +20,7 @@
 package geosite
 
 import (
-	"errors"
+	"fmt"
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/geofile"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/domain"
@@ -43,6 +43,10 @@ func Init(bp *coremain.BP, args any) (any, error) {
 		return nil, err
 	}
 	return m, nil
+}
+
+func (geosite V2rayGeosite) CleanUp() {
+	geofile.CleanUp()
 }
 
 type Args struct {
@@ -94,7 +98,7 @@ func LoadFile(file string, code string, m *domain.MixMatcher[struct{}]) error {
 			return err
 		}
 		if domains == nil || len(domains) == 0 {
-			return errors.New(code + " not found in " + file)
+			return fmt.Errorf(code + " not found in " + file)
 		}
 		for _, dom := range domains {
 			var pattern = dom.Value

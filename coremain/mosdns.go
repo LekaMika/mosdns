@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/IrineSistiana/mosdns/v5/mlog"
-	"github.com/IrineSistiana/mosdns/v5/pkg/geofile"
 	"github.com/IrineSistiana/mosdns/v5/pkg/safe_close"
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus"
@@ -34,6 +33,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/pprof"
+	"os"
 	"runtime/debug"
 )
 
@@ -121,8 +121,9 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 	}
 	m.logger.Info("all plugins are loaded")
 
-	geofile.Release()
 	defer debug.FreeOSMemory()
+
+	m.logger.Info(fmt.Sprintf("pid=%d uid=%d gid=%d", os.Getpid(), os.Getuid(), os.Getgid()))
 
 	return m, nil
 }

@@ -26,7 +26,6 @@ import (
 
 	"github.com/IrineSistiana/mosdns/v5/pkg/dnsutils"
 	"github.com/miekg/dns"
-	"golang.org/x/exp/constraints"
 )
 
 // getMsgKey returns a string key for the query msg, or an empty
@@ -36,53 +35,22 @@ func getMsgKey(q *dns.Msg, separator string) string {
 	return fmt.Sprintf("%s%s%s%s%s", dns.TypeToString[question.Qtype], separator, dns.ClassToString[question.Qclass], separator, question.Name)
 }
 
-func copyNoOpt(m *dns.Msg) *dns.Msg {
+func setDefaultVal(m *dns.Msg) *dns.Msg {
 	if m == nil {
 		return nil
 	}
 
-	m2 := new(dns.Msg)
-	m2.MsgHdr = m.MsgHdr
-	m2.Compress = m.Compress
-
-	if len(m.Question) > 0 {
-		m2.Question = make([]dns.Question, len(m.Question))
-		copy(m2.Question, m.Question)
+	if m.Answer == nil {
+		m.Answer = make([]dns.RR, 0)
+	}
+	if m.Ns == nil {
+		m.Ns = make([]dns.RR, 0)
+	}
+	if m.Extra == nil {
+		m.Extra = make([]dns.RR, 0)
 	}
 
-	lenExtra := len(m.Extra)
-	for _, r := range m.Extra {
-		if r.Header().Rrtype == dns.TypeOPT {
-			lenExtra--
-		}
-	}
-
-	s := make([]dns.RR, len(m.Answer)+len(m.Ns)+lenExtra)
-	m2.Answer, s = s[:0:len(m.Answer)], s[len(m.Answer):]
-	m2.Ns, s = s[:0:len(m.Ns)], s[len(m.Ns):]
-	m2.Extra = s[:0:lenExtra]
-
-	for _, r := range m.Answer {
-		m2.Answer = append(m2.Answer, dns.Copy(r))
-	}
-	for _, r := range m.Ns {
-		m2.Ns = append(m2.Ns, dns.Copy(r))
-	}
-
-	for _, r := range m.Extra {
-		if r.Header().Rrtype == dns.TypeOPT {
-			continue
-		}
-		m2.Extra = append(m2.Extra, dns.Copy(r))
-	}
-	return m2
-}
-
-func min[T constraints.Ordered](a, b T) T {
-	if a < b {
-		return a
-	}
-	return b
+	return m
 }
 
 // getRespFromCache returns the cached response from cache.
@@ -91,18 +59,18 @@ func min[T constraints.Ordered](a, b T) T {
 // Note: Caller SHOULD change the msg id because it's not same as query's.
 func getRespFromCache(key string, backend *redis_cache.Cache, lazyCacheEnabled bool, lazyTtl int) (*dns.Msg, bool) {
 	// Lookup cache
-	v, ok := backend.Get(key)
+	item, ok := backend.Get(key)
 
 	// Cache hit
-	if ok && v != nil {
+	if ok && item != nil {
 		now := time.Now()
 
-		expirationTime := v.ExpirationTime
-		storedTime := v.StoredTime
-		resp := v.Resp
+		expirationTime := item.ExpirationTime
+		storedTime := item.StoredTime
+		resp := setDefaultVal(item.Resp)
 		// Not expired.
 		if now.Before(expirationTime) {
-			r := resp.Copy()
+			r := resp
 			dnsutils.SubtractTTL(r, uint32(now.Sub(storedTime).Seconds()))
 			return r, false
 		}
@@ -110,7 +78,7 @@ func getRespFromCache(key string, backend *redis_cache.Cache, lazyCacheEnabled b
 		// Msg expired but cache isn't. This is a lazy cache enabled entry.
 		// If lazy cache is enabled, return the response.
 		if lazyCacheEnabled {
-			r := resp.Copy()
+			r := resp
 			dnsutils.SetTTL(r, uint32(lazyTtl))
 			return r, true
 		}
@@ -158,7 +126,7 @@ func saveRespToCache(msgKey string, r *dns.Msg, backend *redis_cache.Cache, lazy
 	now := time.Now()
 	expirationTime := now.Add(msgTtl)
 	v := &redis_cache.Item{
-		Resp:           copyNoOpt(r),
+		Resp:           setDefaultVal(r),
 		StoredTime:     now,
 		ExpirationTime: expirationTime,
 	}

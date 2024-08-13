@@ -20,6 +20,7 @@
 package query_context
 
 import (
+	json "github.com/bytedance/sonic"
 	"sync/atomic"
 	"time"
 
@@ -241,10 +242,16 @@ func (ctx *Context) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 		zap.Stringer("client", clientAddr).AddTo(encoder)
 	}
 
+	option := &ctx.QOpt().Option
+	marshal, _ := json.Marshal(option)
+
 	question := ctx.query.Question[0]
 	encoder.AddString("qname", question.Name)
 	encoder.AddUint16("qtype", question.Qtype)
+	encoder.AddString("qtypeName", dns.TypeToString[question.Qtype])
 	encoder.AddUint16("qclass", question.Qclass)
+	encoder.AddString("qclassName", dns.ClassToString[question.Qclass])
+	encoder.AddString("edns", string(marshal))
 
 	if r := ctx.resp; r != nil {
 		encoder.AddInt("rcode", r.Rcode)

@@ -21,7 +21,6 @@ package redis_cache
 
 import (
 	"context"
-	//"encoding/json"
 	"fmt"
 	"github.com/IrineSistiana/mosdns/v5/pkg/utils"
 	"github.com/miekg/dns"
@@ -30,8 +29,6 @@ import (
 	"io"
 	"sync/atomic"
 	"time"
-
-	json "github.com/bytedance/sonic"
 )
 
 var nopLogger = zap.NewNop()
@@ -121,14 +118,14 @@ func (c *Cache) Get(key string) (*Item, bool) {
 		}
 		return nil, false
 	}
-	item := UnmarshalDNSItem([]byte(str))
-	return &item, true
+	item := unmarshalDNSItemFromJson([]byte(str))
+	return item, true
 }
 
 // Store stores this kv in cache. If expirationTime is before time.Now(),
 // Store is an noop.
 func (c *Cache) Store(key string, item *Item, cacheTtl time.Duration) {
-	msg, _ := json.Marshal(item)
+	msg := marshalDNSItemToJson(*item)
 	ctx, cancel := context.WithTimeout(context.Background(), c.Opts.ClientTimeout)
 	defer cancel()
 	if err := c.Opts.Client.Set(ctx, key, msg, cacheTtl).Err(); err != nil {
