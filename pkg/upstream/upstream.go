@@ -220,16 +220,27 @@ func NewUpstream(addr string, opt Opt) (_ Upstream, err error) {
 
 		// Socks5 enabled.
 		if s5Addr := opt.Socks5; len(s5Addr) > 0 {
-			socks5Dialer, err := proxy.SOCKS5("tcp", s5Addr, nil, dialer)
-			if err != nil {
-				return nil, fmt.Errorf("failed to init socks5 dialer: %w", err)
-			}
-
-			contextDialer := socks5Dialer.(proxy.ContextDialer)
-			dialAddr := net.JoinHostPort(host, strconv.Itoa(int(port)))
-			return func(ctx context.Context) (net.Conn, error) {
-				return contextDialer.DialContext(ctx, "tcp", dialAddr)
-			}, nil
+            if strings.HasPrefix(s5Addr, "/") {
+                socks5Dialer, err := proxy.SOCKS5("unix", s5Addr, nil, dialer)
+                if err != nil {
+            		return nil, fmt.Errorf("failed to init socks5 dialer with unix domain socket: %w", err)
+                }
+            	contextDialer := socks5Dialer.(proxy.ContextDialer)
+            	dialAddr := net.JoinHostPort(host, strconv.Itoa(int(port)))
+            	return func(ctx context.Context) (net.Conn, error) {
+            		return contextDialer.DialContext(ctx, "tcp", dialAddr)
+            	}, nil
+            } else {
+                socks5Dialer, err := proxy.SOCKS5("tcp", s5Addr, nil, dialer)
+            	if err != nil {
+            		return nil, fmt.Errorf("failed to init socks5 dialer: %w", err)
+            	}
+            	contextDialer := socks5Dialer.(proxy.ContextDialer)
+            	dialAddr := net.JoinHostPort(host, strconv.Itoa(int(port)))
+            	return func(ctx context.Context) (net.Conn, error) {
+            		return contextDialer.DialContext(ctx, "tcp", dialAddr)
+            	}, nil
+            }
 		}
 
 		if _, err := netip.ParseAddr(host); err == nil {
