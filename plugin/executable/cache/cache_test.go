@@ -28,7 +28,7 @@ import (
 )
 
 func Test_cachePlugin_Dump(t *testing.T) {
-	c := NewCache(&Args{Size: 16 * dumpBlockSize}, Opts{}) // Big enough to create dump fragments.
+	c := NewMemoryCache(&Args{Size: 16 * dumpBlockSize}, Opts{}) // Big enough to create dump fragments.
 
 	resp := new(dns.Msg)
 	resp.SetQuestion("test.", dns.TypeA)
@@ -43,7 +43,7 @@ func Test_cachePlugin_Dump(t *testing.T) {
 
 	// Fill the cache
 	for i := 0; i < 32*dumpBlockSize; i++ {
-		c.backend.Store(key(strconv.Itoa(i)), v, hourLater)
+		c.backend.Store(key(strconv.Itoa(i)), v, time.Hour)
 	}
 
 	buf := new(bytes.Buffer)

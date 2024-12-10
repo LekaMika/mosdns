@@ -67,7 +67,7 @@ func (h *HttpHandler) warnErr(req *http.Request, msg string, err error) {
 }
 
 func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	clientAddr, _ := netip.ParseAddr("127.0.0.127")
+	clientAddr, _ := netip.ParseAddr("0.0.0.0")
 	// read remote addr from header
 	if header := h.srcIPHeader; len(header) != 0 {
 		if xff := req.Header.Get(header); len(xff) != 0 {
@@ -80,7 +80,7 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			clientAddr = addr
 		}
 	}
-	if clientAddr.String() == "127.0.0.127" {
+	if clientAddr.String() == "0.0.0.0" && req.RemoteAddr != "@" {
 		addrPort, err := netip.ParseAddrPort(req.RemoteAddr)
 		if err != nil {
 			h.logger.Error("failed to parse request remote addr", zap.String("addr", req.RemoteAddr), zap.Error(err))

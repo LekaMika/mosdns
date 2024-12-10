@@ -24,7 +24,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
@@ -104,6 +107,17 @@ func StartServer(bp *coremain.BP, args *Args) (*HttpServer, error) {
 		return nil, fmt.Errorf("failed to listen socket, %w", err)
 	}
 	bp.L().Info("http server started", zap.Stringer("addr", l.Addr()))
+
+	if listenerNetwork == "unix" {
+		// 清理sockfile
+		os.Remove(args.Listen)
+		s := make(chan os.Signal, 1)
+		signal.Notify(s, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-s
+			os.Remove(args.Listen)
+		}()
+	}
 
 	hs := &http.Server{
 		Handler:        mux,

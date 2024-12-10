@@ -24,7 +24,10 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
@@ -109,6 +112,17 @@ func StartServer(bp *coremain.BP, args *Args) (*TcpServer, error) {
 		err := server.ServeTCP(l, dh, serverOpts)
 		bp.M().GetSafeClose().SendCloseSignal(err)
 	}()
+
+	if listenerNetwork == "unix" {
+		// 清理sockfile
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-c
+			os.Remove(args.Listen)
+		}()
+	}
+
 	return &TcpServer{
 		args: args,
 		l:    l,

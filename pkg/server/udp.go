@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/netip"
 
 	"github.com/IrineSistiana/mosdns/v5/pkg/pool"
 	"github.com/miekg/dns"
@@ -107,3 +108,50 @@ func ServeUDP(c *net.UDPConn, h Handler, opts UDPServerOpts) error {
 
 type getSrcAddrFromOOB func(oob []byte) (net.IP, error)
 type writeSrcAddrToOOB func(a net.IP) []byte
+
+// ServeUnix starts a server at c. It returns if c had a read error.
+// It always returns a non-nil error.
+// h is required. logger is optional.
+func ServeUnix(c *net.UnixConn, h Handler, opts UDPServerOpts) error {
+	logger := opts.Logger
+	if logger == nil {
+		logger = nopLogger
+	}
+
+	listenerCtx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(errListenerCtxCanceled)
+
+	rb := pool.GetBuf(dns.MaxMsgSize)
+	defer pool.ReleaseBuf(rb)
+
+	buf := *rb
+
+	for {
+		n, addr, err := c.ReadFromUnix(buf)
+		if err != nil {
+			if n == 0 {
+				return fmt.Errorf("unexpected read err: %w", err)
+			}
+			// Temporary err.
+			logger.Warn("read err", zap.Error(err))
+			continue
+		}
+
+		q := new(dns.Msg)
+		if err := q.Unpack(buf[:n]); err != nil {
+			logger.Warn("invalid msg", zap.Error(err), zap.Binary("msg", buf[:n]))
+			continue
+		}
+
+		// handle query
+		go func() {
+			payload := h.Handle(listenerCtx, q, QueryMeta{ClientAddr: netip.Addr{}, FromUDP: true}, pool.PackBuffer)
+			if payload == nil {
+				return
+			}
+			if _, err := c.WriteToUnix(*payload, addr); err != nil {
+				logger.Warn("failed to write response", zap.Error(err))
+			}
+		}()
+	}
+}

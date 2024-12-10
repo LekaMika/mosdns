@@ -59,7 +59,7 @@ type Selector struct {
 	sequence.BQ
 	prefer uint16 // dns.TypeA or dns.TypeAAAA
 
-	preferTypOkCache *cache.Cache[key, bool]
+	preferTypOkCache *cache.MemoryCache[key, bool]
 }
 
 // Exec implements handler.Executable.
@@ -83,7 +83,7 @@ func (s *Selector) Exec(ctx context.Context, qCtx *query_context.Context, next s
 		}
 
 		if r := qCtx.R(); r != nil && msgAnsHasRR(r, s.prefer) {
-			s.preferTypOkCache.Store(qName, true, time.Now().Add(cacheTlt))
+			s.preferTypOkCache.Store(qName, true, cacheTlt)
 		}
 		return nil
 	}
@@ -121,7 +121,7 @@ func (s *Selector) Exec(ctx context.Context, qCtx *query_context.Context, next s
 		}
 		if r := qCtx.R(); r != nil && msgAnsHasRR(r, s.prefer) {
 			// Target domain has preferred type.
-			s.preferTypOkCache.Store(qName, true, time.Now().Add(cacheTlt))
+			s.preferTypOkCache.Store(qName, true, cacheTlt)
 			close(shouldBlock)
 			return
 		}
@@ -187,7 +187,7 @@ func newSelector(bq sequence.BQ, preferType uint16) *Selector {
 	return &Selector{
 		BQ:               bq,
 		prefer:           preferType,
-		preferTypOkCache: cache.New[key, bool](cache.Opts{Size: cacheSize, CleanerInterval: cacheGcInterval}),
+		preferTypOkCache: cache.NewMemoryCache[key, bool](cache.MemoryCacheOpts{Size: cacheSize, CleanerInterval: cacheGcInterval}),
 	}
 }
 

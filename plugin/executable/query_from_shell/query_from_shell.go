@@ -17,9 +17,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package network_interface
+package queryfromshell
 
 import (
+	"bytes"
 	"context"
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/dnsutils"
@@ -28,10 +29,12 @@ import (
 	"github.com/miekg/dns"
 	"net"
 	"net/netip"
+	"os/exec"
+	"strings"
 	"sync"
 )
 
-const PluginType = "network_interface"
+const PluginType = "query_from_shell"
 
 func init() {
 	coremain.RegNewPluginFunc(PluginType, Init, func() any { return new(Args) })
@@ -39,50 +42,50 @@ func init() {
 }
 
 var mutex sync.Mutex
-var pluginCache = make(map[string]*networkInterface)
+var pluginCache = make(map[string]*queryFromShell)
 
-var _ sequence.Executable = (*networkInterface)(nil)
+var _ sequence.Executable = (*queryFromShell)(nil)
 
-type networkInterface struct {
+type queryFromShell struct {
 	args *Args
 }
 
 type Args struct {
-	InterfaceName string `yaml:"interface"`
+	Cmd string `yaml:"cmd"`
 }
 
 func Init(bp *coremain.BP, args any) (any, error) {
-	name := args.(*Args).InterfaceName
-	return getNetworkInterfacePlugin(name), nil
+	cmd := args.(*Args).Cmd
+	return getQueryFromShellPlugin(cmd), nil
 }
 
-func QuickSetup(_ sequence.BQ, name string) (any, error) {
-	return getNetworkInterfacePlugin(name), nil
+func QuickSetup(_ sequence.BQ, cmd string) (any, error) {
+	return getQueryFromShellPlugin(cmd), nil
 }
 
-func getNetworkInterfacePlugin(name string) *networkInterface {
-	plugin := pluginCache[name]
+func getQueryFromShellPlugin(cmd string) *queryFromShell {
+	plugin := pluginCache[cmd]
 	if plugin == nil {
 		mutex.Lock()
-		plugin = &networkInterface{
+		plugin = &queryFromShell{
 			args: &Args{
-				InterfaceName: name,
+				Cmd: cmd,
 			},
 		}
-		pluginCache[name] = plugin
+		pluginCache[cmd] = plugin
 		mutex.Unlock()
 	}
 	return plugin
 }
 
-func (b *networkInterface) Exec(_ context.Context, qCtx *query_context.Context) error {
+func (b *queryFromShell) Exec(_ context.Context, qCtx *query_context.Context) error {
 	if r := b.response(qCtx.Q()); r != nil {
 		qCtx.SetResponse(r)
 	}
 	return nil
 }
 
-func (b *networkInterface) response(m *dns.Msg) *dns.Msg {
+func (b *queryFromShell) response(m *dns.Msg) *dns.Msg {
 	if len(m.Question) != 1 {
 		return nil
 	}
@@ -93,9 +96,17 @@ func (b *networkInterface) response(m *dns.Msg) *dns.Msg {
 		return nil
 	}
 
-	name := b.args.InterfaceName
+	cmdLine := b.args.Cmd
 
-	interfaces, err := net.Interfaces()
+	// 要执行的命令
+	cmd := exec.Command("sh", "-c", cmdLine)
+
+	// 创建一个缓冲区来捕获命令的输出
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	// 执行命令
+	err := cmd.Run()
 	if err != nil {
 		return nil
 	}
@@ -103,25 +114,12 @@ func (b *networkInterface) response(m *dns.Msg) *dns.Msg {
 	ipv4 := make([]netip.Addr, 0)
 	ipv6 := make([]netip.Addr, 0)
 
-	for _, i := range interfaces {
-		if i.Name != name {
-			continue
-		}
-
-		addrs, err := i.Addrs()
-		if err != nil {
-			continue
-		}
-
-		for _, addr := range addrs {
-			var ip net.IP
-			switch v := addr.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-			}
-
+	result := out.String()
+	ips := strings.Split(result, "\n")
+	for i := range ips {
+		ipStr := ips[i]
+		ip := net.ParseIP(ipStr)
+		if ip != nil {
 			addr, ok := netip.AddrFromSlice(ip)
 			if ok {
 				if ip.To4() != nil {
@@ -131,10 +129,6 @@ func (b *networkInterface) response(m *dns.Msg) *dns.Msg {
 				}
 			}
 		}
-	}
-
-	if len(ipv4)+len(ipv6) == 0 {
-		return nil // no such host
 	}
 
 	r := new(dns.Msg)

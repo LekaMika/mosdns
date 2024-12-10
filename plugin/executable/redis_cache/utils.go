@@ -21,7 +21,9 @@ package redis_cache
 
 import (
 	"fmt"
-	"github.com/IrineSistiana/mosdns/v5/pkg/redis_cache"
+	"github.com/IrineSistiana/mosdns/v5/pkg/cache"
+	"github.com/redis/go-redis/v9"
+	"strings"
 	"time"
 
 	"github.com/IrineSistiana/mosdns/v5/pkg/dnsutils"
@@ -30,9 +32,13 @@ import (
 
 // getMsgKey returns a string key for the query msg, or an empty
 // string if query should not be cached.
-func getMsgKey(q *dns.Msg, separator string) string {
+func getMsgKey(q *dns.Msg, separator string, prefix string) string {
 	question := q.Question[0]
-	return fmt.Sprintf("%s%s%s%s%s", dns.TypeToString[question.Qtype], separator, dns.ClassToString[question.Qclass], separator, question.Name)
+	if len(strings.TrimSpace(prefix)) > 0 {
+		return fmt.Sprintf("%s%s%s%s%s%s%s", prefix, separator, dns.TypeToString[question.Qtype], separator, dns.ClassToString[question.Qclass], separator, question.Name)
+	} else {
+		return fmt.Sprintf("%s%s%s%s%s", dns.TypeToString[question.Qtype], separator, dns.ClassToString[question.Qclass], separator, question.Name)
+	}
 }
 
 func setDefaultVal(m *dns.Msg) *dns.Msg {
@@ -57,10 +63,10 @@ func setDefaultVal(m *dns.Msg) *dns.Msg {
 // The ttl of returned msg will be changed properly.
 // Returned bool indicates whether this response is hit by lazy cache.
 // Note: Caller SHOULD change the msg id because it's not same as query's.
-func getRespFromCache(key string, backend *redis_cache.Cache, lazyCacheEnabled bool, lazyTtl int) (*dns.Msg, bool) {
+func getRespFromCache(msgKey string, backend cache.Cache[string, string], lazyCacheEnabled bool, lazyTtl int) (*dns.Msg, bool) {
 	// Lookup cache
-	item, ok := backend.Get(key)
-
+	v, _, ok := backend.Get(msgKey)
+	item := unmarshalDNSItemFromJson([]byte(v))
 	// Cache hit
 	if ok && item != nil {
 		now := time.Now()
@@ -88,9 +94,19 @@ func getRespFromCache(key string, backend *redis_cache.Cache, lazyCacheEnabled b
 	return nil, false
 }
 
+func (c *RedisCache) Get(q *dns.Msg) (*dns.Msg, bool) {
+	msgKey := getMsgKey(q, c.args.Separator, c.args.Prefix)
+	return getRespFromCache(msgKey, c.backend, false, c.args.LazyCacheTTL)
+}
+
+func (c *RedisCache) Store(q *dns.Msg, r *dns.Msg) {
+	msgKey := getMsgKey(q, c.args.Separator, c.args.Prefix)
+	saveRespToCache(msgKey, r, c.backend, c.args.LazyCacheTTL)
+}
+
 // saveRespToCache saves r to cache backend. It returns false if r
 // should not be cached and was skipped.
-func saveRespToCache(msgKey string, r *dns.Msg, backend *redis_cache.Cache, lazyCacheTtl int) bool {
+func saveRespToCache(msgKey string, r *dns.Msg, backend cache.Cache[string, string], lazyCacheTtl int) bool {
 	if r.Truncated != false {
 		return false
 	}
@@ -107,29 +123,36 @@ func saveRespToCache(msgKey string, r *dns.Msg, backend *redis_cache.Cache, lazy
 	case dns.RcodeSuccess:
 		minTTL := dnsutils.GetMinimalTTL(r)
 		if len(r.Answer) == 0 { // Empty answer. Set ttl between 0~300.
-			const maxEmtpyAnswerTtl = 300
-			msgTtl = time.Duration(min(minTTL, maxEmtpyAnswerTtl)) * time.Second
-			cacheTtl = msgTtl
+			const maxEmptyAnswerTtl = 300
+			msgTtl = time.Duration(min(minTTL, maxEmptyAnswerTtl)) * time.Second
+			if lazyCacheTtl == redis.KeepTTL {
+				cacheTtl = redis.KeepTTL
+			} else {
+				cacheTtl = msgTtl
+			}
 		} else {
 			msgTtl = time.Duration(minTTL) * time.Second
-			if lazyCacheTtl > 0 {
+			if lazyCacheTtl == redis.KeepTTL {
+				cacheTtl = redis.KeepTTL
+			} else if lazyCacheTtl > 0 {
 				cacheTtl = time.Duration(lazyCacheTtl) * time.Second
 			} else {
 				cacheTtl = msgTtl
 			}
 		}
 	}
-	if msgTtl <= 0 || cacheTtl <= 0 {
+	if msgTtl <= 0 || (cacheTtl <= 0 && cacheTtl != redis.KeepTTL) {
 		return false
 	}
 
 	now := time.Now()
 	expirationTime := now.Add(msgTtl)
-	v := &redis_cache.Item{
+	v := &Item{
 		Resp:           setDefaultVal(r),
 		StoredTime:     now,
 		ExpirationTime: expirationTime,
 	}
-	backend.Store(msgKey, v, cacheTtl)
+	msg := marshalDNSItemToJson(*v)
+	backend.Store(msgKey, string(msg), cacheTtl)
 	return true
 }

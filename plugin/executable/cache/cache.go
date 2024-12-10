@@ -66,7 +66,7 @@ const (
 	dumpMaximumBlockLength = 1 << 20 // 1M block. 8kb pre entry. Should be enough.
 )
 
-var _ sequence.RecursiveExecutable = (*Cache)(nil)
+var _ sequence.RecursiveExecutable = (*MemoryCache)(nil)
 
 type Args struct {
 	Size         int    `yaml:"size"`
@@ -80,11 +80,11 @@ func (a *Args) init() {
 	utils.SetDefaultUnsignNum(&a.DumpInterval, 600)
 }
 
-type Cache struct {
+type MemoryCache struct {
 	args *Args
 
 	logger       *zap.Logger
-	backend      *cache.Cache[key, *item]
+	backend      *cache.MemoryCache[key, *item]
 	lazyUpdateSF singleflight.Group
 	closeOnce    sync.Once
 	closeNotify  chan struct{}
@@ -97,7 +97,7 @@ type Cache struct {
 }
 
 func Init(bp *coremain.BP, args any) (any, error) {
-	c := NewCache(args.(*Args), Opts{
+	c := NewMemoryCache(args.(*Args), Opts{
 		Logger:     bp.L(),
 		MetricsTag: bp.Tag(),
 	})
@@ -121,7 +121,7 @@ func quickSetupCache(bq sequence.BQ, s string) (any, error) {
 		size = i
 	}
 	// Don't register metrics in quick setup.
-	return NewCache(&Args{Size: size}, Opts{Logger: bq.L()}), nil
+	return NewMemoryCache(&Args{Size: size}, Opts{Logger: bq.L()}), nil
 }
 
 type Opts struct {
@@ -129,7 +129,7 @@ type Opts struct {
 	MetricsTag string
 }
 
-func NewCache(args *Args, opts Opts) *Cache {
+func NewMemoryCache(args *Args, opts Opts) *MemoryCache {
 	args.init()
 
 	logger := opts.Logger
@@ -137,9 +137,9 @@ func NewCache(args *Args, opts Opts) *Cache {
 		logger = zap.NewNop()
 	}
 
-	backend := cache.New[key, *item](cache.Opts{Size: args.Size})
+	backend := cache.NewMemoryCache[key, *item](cache.MemoryCacheOpts{Size: args.Size})
 	lb := map[string]string{"tag": opts.MetricsTag}
-	p := &Cache{
+	p := &MemoryCache{
 		args:        args,
 		logger:      logger,
 		backend:     backend,
@@ -177,7 +177,7 @@ func NewCache(args *Args, opts Opts) *Cache {
 	return p
 }
 
-func (c *Cache) RegMetricsTo(r prometheus.Registerer) error {
+func (c *MemoryCache) RegMetricsTo(r prometheus.Registerer) error {
 	for _, collector := range [...]prometheus.Collector{c.queryTotal, c.hitTotal, c.lazyHitTotal, c.size} {
 		if err := r.Register(collector); err != nil {
 			return err
@@ -186,7 +186,7 @@ func (c *Cache) RegMetricsTo(r prometheus.Registerer) error {
 	return nil
 }
 
-func (c *Cache) Exec(ctx context.Context, qCtx *query_context.Context, next sequence.ChainWalker) error {
+func (c *MemoryCache) Exec(ctx context.Context, qCtx *query_context.Context, next sequence.ChainWalker) error {
 	c.queryTotal.Inc()
 	q := qCtx.Q()
 
@@ -217,7 +217,7 @@ func (c *Cache) Exec(ctx context.Context, qCtx *query_context.Context, next sequ
 
 // doLazyUpdate starts a new goroutine to execute next node and update the cache in the background.
 // It has an inner singleflight.Group to de-duplicate same msgKey.
-func (c *Cache) doLazyUpdate(msgKey string, qCtx *query_context.Context, next sequence.ChainWalker) {
+func (c *MemoryCache) doLazyUpdate(msgKey string, qCtx *query_context.Context, next sequence.ChainWalker) {
 	qCtxCopy := qCtx.Copy()
 	lazyUpdateFunc := func() (any, error) {
 		defer c.lazyUpdateSF.Forget(msgKey)
@@ -243,7 +243,7 @@ func (c *Cache) doLazyUpdate(msgKey string, qCtx *query_context.Context, next se
 	c.lazyUpdateSF.DoChan(msgKey, lazyUpdateFunc) // DoChan won't block this goroutine
 }
 
-func (c *Cache) Close() error {
+func (c *MemoryCache) Close() error {
 	if err := c.dumpCache(); err != nil {
 		c.logger.Error("failed to dump cache", zap.Error(err))
 	}
@@ -253,7 +253,7 @@ func (c *Cache) Close() error {
 	return c.backend.Close()
 }
 
-func (c *Cache) loadDump() error {
+func (c *MemoryCache) loadDump() error {
 	if len(c.args.DumpFile) == 0 {
 		return nil
 	}
@@ -271,7 +271,7 @@ func (c *Cache) loadDump() error {
 }
 
 // startDumpLoop starts a dump loop in another goroutine. It does not block.
-func (c *Cache) startDumpLoop() {
+func (c *MemoryCache) startDumpLoop() {
 	if len(c.args.DumpFile) == 0 {
 		return
 	}
@@ -298,7 +298,7 @@ func (c *Cache) startDumpLoop() {
 	}()
 }
 
-func (c *Cache) dumpCache() error {
+func (c *MemoryCache) dumpCache() error {
 	if len(c.args.DumpFile) == 0 {
 		return nil
 	}
@@ -317,7 +317,7 @@ func (c *Cache) dumpCache() error {
 	return nil
 }
 
-func (c *Cache) Api() *chi.Mux {
+func (c *MemoryCache) Api() *chi.Mux {
 	r := chi.NewRouter()
 	r.Get("/flush", func(w http.ResponseWriter, req *http.Request) {
 		c.backend.Flush()
@@ -340,7 +340,7 @@ func (c *Cache) Api() *chi.Mux {
 	return r
 }
 
-func (c *Cache) writeDump(w io.Writer) (int, error) {
+func (c *MemoryCache) writeDump(w io.Writer) (int, error) {
 	en := 0
 
 	gw, _ := gzip.NewWriterLevel(w, gzip.BestSpeed)
@@ -406,7 +406,7 @@ func (c *Cache) writeDump(w io.Writer) (int, error) {
 
 // readDump reads dumped data from r. It returns the number of bytes read,
 // number of entries read and any error encountered.
-func (c *Cache) readDump(r io.Reader) (int, error) {
+func (c *MemoryCache) readDump(r io.Reader) (int, error) {
 	en := 0
 	gr, err := gzip.NewReader(r)
 	if err != nil {
@@ -459,7 +459,7 @@ func (c *Cache) readDump(r io.Reader) (int, error) {
 				storedTime:     storedTime,
 				expirationTime: msgExpTime,
 			}
-			c.backend.Store(key(entry.GetKey()), i, cacheExpTime)
+			c.backend.Store(key(entry.GetKey()), i, time.Now().Sub(cacheExpTime))
 		}
 		return nil
 	}

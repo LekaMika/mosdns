@@ -25,19 +25,19 @@ import (
 	"time"
 )
 
-type testKey int
+type testMemoryCacheKey int
 
-func (t testKey) Sum() uint64 {
+func (t testMemoryCacheKey) Sum() uint64 {
 	return uint64(t)
 }
 
 func Test_Cache(t *testing.T) {
-	c := New[testKey, int](Opts{
+	c := NewMemoryCache[testMemoryCacheKey, int](MemoryCacheOpts{
 		Size: 1024,
 	})
 	for i := 0; i < 128; i++ {
-		key := testKey(i)
-		c.Store(key, i, time.Now().Add(time.Millisecond*200))
+		key := testMemoryCacheKey(i)
+		c.Store(key, i, time.Millisecond*200)
 		v, _, ok := c.Get(key)
 
 		if v != i {
@@ -49,8 +49,8 @@ func Test_Cache(t *testing.T) {
 	}
 
 	for i := 0; i < 1024*4; i++ {
-		key := testKey(i)
-		c.Store(key, i, time.Now().Add(time.Millisecond*200))
+		key := testMemoryCacheKey(i)
+		c.Store(key, i, time.Millisecond*200)
 	}
 
 	if l := c.Len(); l > 1024 {
@@ -59,14 +59,14 @@ func Test_Cache(t *testing.T) {
 }
 
 func Test_memCache_cleaner(t *testing.T) {
-	c := New[testKey, int](Opts{
+	c := NewMemoryCache[testMemoryCacheKey, int](MemoryCacheOpts{
 		Size:            1024,
 		CleanerInterval: time.Millisecond * 10,
 	})
 	defer c.Close()
 	for i := 0; i < 64; i++ {
-		key := testKey(i)
-		c.Store(key, i, time.Now().Add(time.Millisecond*10))
+		key := testMemoryCacheKey(i)
+		c.Store(key, i, time.Millisecond*10)
 	}
 
 	time.Sleep(time.Millisecond * 100)
@@ -76,7 +76,7 @@ func Test_memCache_cleaner(t *testing.T) {
 }
 
 func Test_memCache_race(t *testing.T) {
-	c := New[testKey, int](Opts{
+	c := NewMemoryCache[testMemoryCacheKey, int](MemoryCacheOpts{
 		Size: 1024,
 	})
 	defer c.Close()
@@ -87,8 +87,8 @@ func Test_memCache_race(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < 256; i++ {
-				key := testKey(i)
-				c.Store(key, i, time.Now().Add(time.Minute))
+				key := testMemoryCacheKey(i)
+				c.Store(key, i, time.Minute*time.Second)
 				_, _, _ = c.Get(key)
 				c.gc(time.Now())
 			}

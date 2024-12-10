@@ -133,7 +133,7 @@ func min[T constraints.Ordered](a, b T) T {
 // The ttl of returned msg will be changed properly.
 // Returned bool indicates whether this response is hit by lazy cache.
 // Note: Caller SHOULD change the msg id because it's not same as query's.
-func getRespFromCache(msgKey string, backend *cache.Cache[key, *item], lazyCacheEnabled bool, lazyTtl int) (*dns.Msg, bool) {
+func getRespFromCache(msgKey string, backend *cache.MemoryCache[key, *item], lazyCacheEnabled bool, lazyTtl int) (*dns.Msg, bool) {
 	// Lookup cache
 	v, _, _ := backend.Get(key(msgKey))
 
@@ -163,7 +163,7 @@ func getRespFromCache(msgKey string, backend *cache.Cache[key, *item], lazyCache
 
 // saveRespToCache saves r to cache backend. It returns false if r
 // should not be cached and was skipped.
-func saveRespToCache(msgKey string, r *dns.Msg, backend *cache.Cache[key, *item], lazyCacheTtl int) bool {
+func saveRespToCache(msgKey string, r *dns.Msg, backend *cache.MemoryCache[key, *item], lazyCacheTtl int) bool {
 	if r.Truncated != false {
 		return false
 	}
@@ -202,6 +202,6 @@ func saveRespToCache(msgKey string, r *dns.Msg, backend *cache.Cache[key, *item]
 		storedTime:     now,
 		expirationTime: now.Add(msgTtl),
 	}
-	backend.Store(key(msgKey), v, now.Add(cacheTtl))
+	backend.Store(key(msgKey), v, cacheTtl*time.Second)
 	return true
 }

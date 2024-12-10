@@ -22,13 +22,17 @@ package udp_server
 import (
 	"context"
 	"fmt"
+	"go.uber.org/zap"
 	"net"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/server"
 	"github.com/IrineSistiana/mosdns/v5/pkg/utils"
 	"github.com/IrineSistiana/mosdns/v5/plugin/server/server_utils"
-	"go.uber.org/zap"
 )
 
 const PluginType = "udp_server"
@@ -66,12 +70,29 @@ func StartServer(bp *coremain.BP, args *Args) (*UdpServer, error) {
 		return nil, fmt.Errorf("failed to init dns handler, %w", err)
 	}
 
+	listenerNetwork := "udp"
+	if strings.HasPrefix(args.Listen, "@") || strings.HasPrefix(args.Listen, "/") {
+		listenerNetwork = "unixgram"
+	}
+
 	socketOpt := server_utils.ListenerSocketOpts{
 		SO_REUSEPORT: true,
 		SO_RCVBUF:    64 * 1024,
 	}
 	lc := net.ListenConfig{Control: server_utils.ListenerControl(socketOpt)}
-	c, err := lc.ListenPacket(context.Background(), "udp", args.Listen)
+
+	if listenerNetwork == "unixgram" {
+		// 清理sockfile
+		os.Remove(args.Listen)
+		s := make(chan os.Signal, 1)
+		signal.Notify(s, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-s
+			os.Remove(args.Listen)
+		}()
+	}
+
+	c, err := lc.ListenPacket(context.Background(), listenerNetwork, args.Listen)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create socket, %w", err)
 	}
@@ -79,7 +100,11 @@ func StartServer(bp *coremain.BP, args *Args) (*UdpServer, error) {
 
 	go func() {
 		defer c.Close()
-		err := server.ServeUDP(c.(*net.UDPConn), dh, server.UDPServerOpts{Logger: bp.L()})
+		if listenerNetwork == "unixgram" {
+			err = server.ServeUnix(c.(*net.UnixConn), dh, server.UDPServerOpts{Logger: bp.L()})
+		} else {
+			err = server.ServeUDP(c.(*net.UDPConn), dh, server.UDPServerOpts{Logger: bp.L()})
+		}
 		bp.M().GetSafeClose().SendCloseSignal(err)
 	}()
 	return &UdpServer{
