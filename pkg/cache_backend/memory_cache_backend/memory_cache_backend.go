@@ -17,22 +17,23 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package cache
+package memory_cache_backend
 
 import (
+	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
 	"github.com/IrineSistiana/mosdns/v5/pkg/concurrent_map"
 	"github.com/IrineSistiana/mosdns/v5/pkg/utils"
 	"sync/atomic"
 	"time"
 )
 
-type MemoryCacheKey interface {
-	concurrent_map.Hashable
-}
+const (
+	defaultCleanerInterval = time.Second * 10
+)
 
 // Cache is a simple map cache that stores values in memory.
 // It is safe for concurrent use.
-type MemoryCache[K MemoryCacheKey, V Value] struct {
+type MemoryCache[K cache_backend.Key, V interface{}] struct {
 	opts MemoryCacheOpts
 
 	closed      atomic.Bool
@@ -50,7 +51,7 @@ func (opts *MemoryCacheOpts) init() {
 	utils.SetDefaultNum(&opts.CleanerInterval, defaultCleanerInterval)
 }
 
-type elem[V Value] struct {
+type elem[V interface{}] struct {
 	v              V
 	expirationTime time.Time
 }
@@ -60,7 +61,7 @@ type elem[V Value] struct {
 // cleanerInterval specifies the interval that Cache scans
 // and discards expired values. If cleanerInterval <= 0, a default
 // interval will be used.
-func NewMemoryCache[K MemoryCacheKey, V Value](opts MemoryCacheOpts) *MemoryCache[K, V] {
+func NewMemoryCache[K cache_backend.Key, V interface{}](opts MemoryCacheOpts) *MemoryCache[K, V] {
 	opts.init()
 	c := &MemoryCache[K, V]{
 		closeNotify: make(chan struct{}),
@@ -91,7 +92,7 @@ func (c *MemoryCache[K, V]) Get(key K) (value V, expirationTime time.Time, ok bo
 
 // Range calls f through all entries. If f returns an error, the same error will be returned
 // by Range.
-func (c *MemoryCache[K, V]) Range(f func(k K, v V, expirationTime time.Time) error) error {
+func (c *MemoryCache[K, V]) Range(f func(key K, value V, expirationTime time.Time) error) error {
 	cf := func(k K, v *elem[V]) (newV *elem[V], setV bool, delV bool, err error) {
 		return nil, false, false, f(k, v.v, v.expirationTime)
 	}
@@ -145,4 +146,8 @@ func (c *MemoryCache[K, V]) Len() int {
 // Flush removes all stored entries from this cache.
 func (c *MemoryCache[K, V]) Flush() {
 	c.m.Flush()
+}
+
+func (c *MemoryCache[K, V]) Delete(key K) error {
+	return nil
 }

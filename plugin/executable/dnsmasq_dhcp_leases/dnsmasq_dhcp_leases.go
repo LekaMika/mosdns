@@ -22,17 +22,17 @@ package dnsmasq_dhcp_leases
 import (
 	"context"
 	"github.com/IrineSistiana/mosdns/v5/coremain"
-	"github.com/IrineSistiana/mosdns/v5/pkg/dnsutils"
+	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/domain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
-	"github.com/IrineSistiana/mosdns/v5/plugin/executable/redis_cache"
-	"github.com/IrineSistiana/mosdns/v5/plugin/executable/reverse_lookup_redis_cache"
+	"github.com/IrineSistiana/mosdns/v5/plugin/executable/cache"
+	"github.com/IrineSistiana/mosdns/v5/plugin/executable/cache/redis_cache"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
 	"github.com/b0ch3nski/go-dnsmasq-utils/dnsmasq"
 	"github.com/miekg/dns"
+	"go.uber.org/zap"
 	"os"
 	"strings"
-	"time"
 )
 
 const PluginType = "dnsmasq_dhcp_leases"
@@ -44,21 +44,21 @@ func init() {
 var _ sequence.Executable = (*Leases)(nil)
 
 type Args struct {
-	File                  string   `yaml:"file"`
-	Suffixs               []string `yaml:"suffix"`
-	CacheTag              string   `yaml:"init_cache_tag"`
-	ReverseLookupCacheTag string   `yaml:"init_reverse_lookup_cache_tag"`
+	File     string   `yaml:"file"`
+	Suffixs  []string `yaml:"suffix"`
+	CacheTag string   `yaml:"cache_tag"`
 }
 
 type Leases struct {
-	file               string
-	leases             []*dnsmasq.Lease
-	ipv4Leases         []*dnsmasq.Lease
-	ipv6Leases         []*dnsmasq.Lease
-	leaseChan          chan []*dnsmasq.Lease
-	matcher            domain.Matcher[*leasesGroup]
-	cache              *redis_cache.RedisCache
-	reverseLookupCache *reverse_lookup_redis_cache.ReverseLookupRedisCache
+	args       *Args
+	logger     *zap.Logger
+	file       string
+	leases     []*dnsmasq.Lease
+	ipv4Leases []*dnsmasq.Lease
+	ipv6Leases []*dnsmasq.Lease
+	leaseChan  chan []*dnsmasq.Lease
+	matcher    domain.Matcher[*leasesGroup]
+	cache      cache.Cache[cache_backend.StringKey, string]
 }
 
 type leasesGroup struct {
@@ -83,6 +83,8 @@ func NewLeases(bp *coremain.BP, args *Args) (*Leases, error) {
 	}
 
 	l := &Leases{
+		args:      args,
+		logger:    bp.L(),
 		file:      args.File,
 		leases:    readLeases,
 		leaseChan: leases,
@@ -93,17 +95,12 @@ func NewLeases(bp *coremain.BP, args *Args) (*Leases, error) {
 		l.cache = redisCache
 	}
 
-	if len(strings.TrimSpace(args.ReverseLookupCacheTag)) > 0 {
-		ptrCache := bp.M().GetPlugin(args.ReverseLookupCacheTag).(*reverse_lookup_redis_cache.ReverseLookupRedisCache)
-		l.reverseLookupCache = ptrCache
-	}
-
-	l.buildMatchers(args)
-	go l.start(args)
+	l.buildMatchers()
+	go l.start()
 	return l, nil
 }
 
-func (l *Leases) start(args *Args) {
+func (l *Leases) start() {
 	go dnsmasq.WatchLeases(context.Background(), l.file, l.leaseChan)
 	for leaseBatch := range l.leaseChan {
 		newLeases := make([]*dnsmasq.Lease, 0)
@@ -111,11 +108,11 @@ func (l *Leases) start(args *Args) {
 			newLeases = append(newLeases, lease)
 		}
 		l.leases = newLeases
-		l.buildMatchers(args)
+		l.buildMatchers()
 	}
 }
 
-func (l *Leases) buildMatchers(args *Args) {
+func (l *Leases) buildMatchers() {
 	leases := l.leases
 	ipMap := make(map[string]*leasesGroup)
 	//if l.cache != nil {
@@ -123,34 +120,36 @@ func (l *Leases) buildMatchers(args *Args) {
 	//}
 	l.ipv4Leases = make([]*dnsmasq.Lease, 0)
 	l.ipv6Leases = make([]*dnsmasq.Lease, 0)
-	for i := range leases {
-		lease := leases[i]
+	for _, lease := range leases {
 		hostname := lease.Hostname
 		ipAddr := lease.IPAddr
-		expires := lease.Expires
+		//expires := lease.Expires
 		if !ipAddr.IsValid() {
 			continue
 		}
 		if hostname == "*" {
 			continue
 		}
-		ips := ipMap[hostname]
+		key := hostname + "."
+		ips := ipMap[key]
 		if ips == nil {
 			ips = &leasesGroup{
 				ipv4Leases: make([]*dnsmasq.Lease, 0),
 				ipv6Leases: make([]*dnsmasq.Lease, 0),
 			}
-			ipMap[hostname+"."] = ips
+			ipMap[key] = ips
+			for i2 := range l.args.Suffixs {
+				suffix := l.args.Suffixs[i2]
+				ipMap[key+suffix+"."] = ips
+			}
 		}
+
 		if ipAddr.Is4() {
 			ips.ipv4Leases = append(ips.ipv4Leases, lease)
 			l.ipv4Leases = append(l.ipv4Leases, lease)
 		} else if ipAddr.Is6() {
 			ips.ipv6Leases = append(ips.ipv6Leases, lease)
-			l.ipv6Leases = append(l.ipv4Leases, lease)
-		}
-		if l.reverseLookupCache != nil {
-			l.reverseLookupCache.StorePtrKeyPair(hostname+".", ipAddr.String(), expires)
+			l.ipv6Leases = append(l.ipv6Leases, lease)
 		}
 	}
 	m := domain.NewMixMatcher[*leasesGroup]()
@@ -162,30 +161,14 @@ func (l *Leases) buildMatchers(args *Args) {
 	l.matcher = m
 
 	// init cache data
-	for key := range ipMap {
-		questions := make([]dns.Question, 0)
-		questions = append(questions, dns.Question{
-			Name:   key,
-			Qclass: dns.ClassINET,
-			Qtype:  dns.TypeA,
-		})
-		q := &dns.Msg{
-			Question: questions,
-		}
-		r := l.responseQuery(q)
-		l.cache.Store(q, r)
-
-		questions = make([]dns.Question, 0)
-		questions = append(questions, dns.Question{
-			Name:   key,
-			Qclass: dns.ClassINET,
-			Qtype:  dns.TypeAAAA,
-		})
-		q = &dns.Msg{
-			Question: questions,
-		}
-		r = l.responseQuery(q)
-		l.cache.Store(q, r)
+	l.cache.Clean()
+	for fqdn := range ipMap {
+		l.saveCache(fqdn, dns.TypeA)
+		l.saveCache(fqdn, dns.TypeAAAA)
+	}
+	for _, lease := range l.leases {
+		addr := lease.IPAddr
+		l.savePtr2Cache(addr)
 	}
 }
 
@@ -197,124 +180,16 @@ func (l *Leases) lookup(fqdn string) (ipv4, ipv6 []*dnsmasq.Lease) {
 	return ips.ipv4Leases, ips.ipv6Leases
 }
 
-func (l *Leases) responsePtr(m *dns.Msg) *dns.Msg {
-	if len(m.Question) != 1 {
-		return nil
-	}
-	q := m.Question[0]
-	typ := q.Qtype
-	qcl := q.Qclass
-	fqdn := q.Name
-	if q.Qclass != dns.ClassINET || typ != dns.TypePTR {
-		return nil
-	}
-
-	addr, _ := dnsutils.ParsePTRQName(fqdn)
-	if !addr.IsValid() {
-		return nil
-	}
-	var name string
-	if addr.Is4() && len(l.ipv4Leases) > 0 {
-		for i := range l.ipv4Leases {
-			lease := l.ipv4Leases[i]
-			ipAddr := lease.IPAddr
-			if ipAddr.Compare(addr) == 0 {
-				name = lease.Hostname
-				break
-			}
-		}
-	} else if addr.Is6() && len(l.ipv6Leases) > 0 {
-		for i := range l.ipv6Leases {
-			lease := l.ipv6Leases[i]
-			ipAddr := lease.IPAddr
-			if ipAddr.Compare(addr) == 0 {
-				name = lease.Hostname
-				break
-			}
-		}
-	}
-	if len(name) > 0 {
-		r := new(dns.Msg)
-		r.SetReply(m)
-		r.Answer = append(r.Answer, &dns.PTR{
-			Hdr: dns.RR_Header{
-				Name:   fqdn,
-				Rrtype: typ,
-				Class:  qcl,
-				Ttl:    5,
-			},
-			Ptr: name + ".",
-		})
-		return r
-	}
-	return nil
-}
-
-func (l *Leases) responseQuery(m *dns.Msg) *dns.Msg {
-	if len(m.Question) != 1 {
-		return nil
-	}
-	q := m.Question[0]
-	typ := q.Qtype
-	fqdn := q.Name
-	if q.Qclass != dns.ClassINET || (typ != dns.TypeA && typ != dns.TypeAAAA) {
-		return nil
-	}
-
-	ipv4, ipv6 := l.lookup(fqdn)
-	if len(ipv4)+len(ipv6) == 0 {
-		return nil // no such host
-	}
-
-	now := time.Now()
-	r := new(dns.Msg)
-	r.SetReply(m)
-	switch {
-	case typ == dns.TypeA && len(ipv4) > 0:
-		for _, lease := range ipv4 {
-			rr := &dns.A{
-				Hdr: dns.RR_Header{
-					Name:   fqdn,
-					Rrtype: dns.TypeA,
-					Class:  dns.ClassINET,
-					Ttl:    uint32(lease.Expires.Sub(now).Seconds()),
-				},
-				A: lease.IPAddr.AsSlice(),
-			}
-			r.Answer = append(r.Answer, rr)
-		}
-	case typ == dns.TypeAAAA && len(ipv6) > 0:
-		for _, lease := range ipv6 {
-			rr := &dns.AAAA{
-				Hdr: dns.RR_Header{
-					Name:   fqdn,
-					Rrtype: dns.TypeAAAA,
-					Class:  dns.ClassINET,
-					Ttl:    uint32(lease.Expires.Sub(now).Seconds()),
-				},
-				AAAA: lease.IPAddr.AsSlice(),
-			}
-			r.Answer = append(r.Answer, rr)
-		}
-	}
-
-	// Append fake SOA record for empty reply.
-	if len(r.Answer) == 0 {
-		r.Ns = []dns.RR{dnsutils.FakeSOA(fqdn)}
-	} else {
-		r.Authoritative = true
-	}
-	return r
-}
-
 func (l *Leases) Exec(ctx context.Context, qCtx *query_context.Context) error {
 	if qCtx.R() == nil {
 		if r := l.responsePtr(qCtx.Q()); r != nil {
+			l.logger.Info("dhcp ptr cache hit", zap.Any("query", qCtx), zap.Any("resp", r))
 			qCtx.SetResponse(r)
 		}
 	}
 	if qCtx.R() == nil {
 		if r := l.responseQuery(qCtx.Q()); r != nil {
+			l.logger.Info("dhcp cache hit", zap.Any("query", qCtx), zap.Any("resp", r))
 			qCtx.SetResponse(r)
 		}
 	}

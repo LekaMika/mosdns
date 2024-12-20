@@ -116,8 +116,7 @@ func (b *queryFromShell) response(m *dns.Msg) *dns.Msg {
 
 	result := out.String()
 	ips := strings.Split(result, "\n")
-	for i := range ips {
-		ipStr := ips[i]
+	for _, ipStr := range ips {
 		ip := net.ParseIP(ipStr)
 		if ip != nil {
 			addr, ok := netip.AddrFromSlice(ip)

@@ -23,7 +23,16 @@ import (
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/netlist"
 	"github.com/xtls/xray-core/app/router"
 	"runtime/debug"
+	"time"
 )
+
+func init() {
+	go func() {
+		time.Sleep(30 * time.Second)
+		CleanUp()
+		debug.FreeOSMemory()
+	}()
+}
 
 var (
 	fileCache = make(map[string][]byte)

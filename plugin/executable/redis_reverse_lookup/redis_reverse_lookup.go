@@ -22,9 +22,11 @@ package reverselookup
 import (
 	"context"
 	"github.com/IrineSistiana/mosdns/v5/coremain"
+	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/pkg/utils"
-	"github.com/IrineSistiana/mosdns/v5/plugin/executable/redis_cache"
+	"github.com/IrineSistiana/mosdns/v5/plugin/executable/cache"
+	"github.com/IrineSistiana/mosdns/v5/plugin/executable/cache/redis_cache"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
 	"github.com/miekg/dns"
 	"net/netip"
@@ -51,8 +53,8 @@ func (a *Args) init() {
 }
 
 type ReverseLookup struct {
-	args *Args
-	c    *redis_cache.RedisCache
+	args  *Args
+	cache cache.Cache[cache_backend.StringKey, string]
 }
 
 func Init(bp *coremain.BP, args any) (any, error) {
@@ -63,8 +65,8 @@ func NewReverseLookup(bp *coremain.BP, args *Args) (any, error) {
 	args.init()
 	c := bp.M().GetPlugin(args.CacheTag).(*redis_cache.RedisCache)
 	p := &ReverseLookup{
-		args: args,
-		c:    c,
+		args:  args,
+		cache: c,
 	}
 	return p, nil
 }
@@ -84,11 +86,11 @@ func (p *ReverseLookup) Exec(ctx context.Context, qCtx *query_context.Context, n
 }
 
 func (p *ReverseLookup) Close() error {
-	return p.c.Close()
+	return p.cache.Close()
 }
 
 func (p *ReverseLookup) lookup(q *dns.Msg) *dns.Msg {
-	r, _ := p.c.Get(q)
+	r, _ := p.cache.QueryDns(q)
 	return r
 }
 
@@ -104,7 +106,7 @@ func (p *ReverseLookup) saveIPs(q, r *dns.Msg) {
 	if r == nil {
 		return
 	}
-	p.c.Store(q, r)
+	p.cache.StoreDns(q, r)
 }
 
 func as16(n netip.Addr) netip.Addr {

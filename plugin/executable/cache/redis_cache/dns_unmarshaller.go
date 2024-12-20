@@ -21,6 +21,7 @@ package redis_cache
 
 import (
 	"fmt"
+	"github.com/IrineSistiana/mosdns/v5/plugin/executable/cache"
 	json "github.com/bytedance/sonic"
 	"github.com/bytedance/sonic/ast"
 	"github.com/miekg/dns"
@@ -186,6 +187,12 @@ func stringToRR(rtype uint16) (rr dns.RR, err error) {
 	return
 }
 
+func marshalDNS(d *dns.Msg) []byte {
+
+	marshal, _ := json.Marshal(d)
+	return marshal
+}
+
 func unmarshalDNS(rawBytes []byte) *dns.Msg {
 
 	msg := &dns.Msg{}
@@ -194,15 +201,15 @@ func unmarshalDNS(rawBytes []byte) *dns.Msg {
 	return msg
 }
 
-func unmarshalDNSItemFromJson(rawBytes []byte) *Item {
+func unmarshalItem(rawBytes string) *cache.Item {
 
-	root, _ := json.Get(rawBytes)
+	root, _ := json.Get([]byte(rawBytes))
 	storedTimeStr, _ := root.Get("StoredTime").String()
 	expirationTimeStr, _ := root.Get("ExpirationTime").String()
 	storedTime, _ := time.Parse(layout, storedTimeStr)
 	expirationTime, _ := time.Parse(layout, expirationTimeStr)
 
-	item := Item{}
+	item := cache.Item{}
 	item.Resp = &dns.Msg{}
 	item.StoredTime = storedTime
 	item.ExpirationTime = expirationTime
@@ -212,10 +219,10 @@ func unmarshalDNSItemFromJson(rawBytes []byte) *Item {
 	return &item
 }
 
-func marshalDNSItemToJson(item Item) (r []byte) {
+func marshalItem(item *cache.Item) string {
 
-	r, _ = json.Marshal(item)
-	return
+	marshal, _ := json.Marshal(item)
+	return string(marshal)
 }
 
 func resolve(root ast.Node, msg *dns.Msg) {

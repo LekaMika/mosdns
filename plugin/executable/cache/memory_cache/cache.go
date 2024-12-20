@@ -17,13 +17,15 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package cache
+package memory_cache
 
 import (
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend/memory_cache_backend"
+	"github.com/IrineSistiana/mosdns/v5/plugin/executable/cache"
 	"io"
 	"net/http"
 	"os"
@@ -33,7 +35,6 @@ import (
 	"time"
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
-	"github.com/IrineSistiana/mosdns/v5/pkg/cache"
 	"github.com/IrineSistiana/mosdns/v5/pkg/pool"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/pkg/utils"
@@ -84,7 +85,7 @@ type MemoryCache struct {
 	args *Args
 
 	logger       *zap.Logger
-	backend      *cache.MemoryCache[key, *item]
+	backend      *memory_cache_backend.MemoryCache[key, *cache.Item]
 	lazyUpdateSF singleflight.Group
 	closeOnce    sync.Once
 	closeNotify  chan struct{}
@@ -137,7 +138,7 @@ func NewMemoryCache(args *Args, opts Opts) *MemoryCache {
 		logger = zap.NewNop()
 	}
 
-	backend := cache.NewMemoryCache[key, *item](cache.MemoryCacheOpts{Size: args.Size})
+	backend := memory_cache_backend.NewMemoryCache[key, *cache.Item](memory_cache_backend.MemoryCacheOpts{Size: args.Size})
 	lb := map[string]string{"tag": opts.MetricsTag}
 	p := &MemoryCache{
 		args:        args,
@@ -241,16 +242,6 @@ func (c *MemoryCache) doLazyUpdate(msgKey string, qCtx *query_context.Context, n
 		return nil, nil
 	}
 	c.lazyUpdateSF.DoChan(msgKey, lazyUpdateFunc) // DoChan won't block this goroutine
-}
-
-func (c *MemoryCache) Close() error {
-	if err := c.dumpCache(); err != nil {
-		c.logger.Error("failed to dump cache", zap.Error(err))
-	}
-	c.closeOnce.Do(func() {
-		close(c.closeNotify)
-	})
-	return c.backend.Close()
 }
 
 func (c *MemoryCache) loadDump() error {
@@ -370,18 +361,18 @@ func (c *MemoryCache) writeDump(w io.Writer) (int, error) {
 	}
 
 	now := time.Now()
-	rangeFunc := func(k key, v *item, cacheExpirationTime time.Time) error {
+	rangeFunc := func(k key, v *cache.Item, cacheExpirationTime time.Time) error {
 		if cacheExpirationTime.Before(now) {
 			return nil
 		}
-		msg, err := v.resp.Pack()
+		msg, err := v.Resp.Pack()
 		if err != nil {
 			return fmt.Errorf("failed to pack msg, %w", err)
 		}
 		e := &CachedEntry{
 			Key:                 []byte(k),
 			CacheExpirationTime: cacheExpirationTime.Unix(),
-			MsgExpirationTime:   v.expirationTime.Unix(),
+			MsgExpirationTime:   v.ExpirationTime.Unix(),
 			Msg:                 msg,
 		}
 		block.Entries = append(block.Entries, e)
@@ -454,10 +445,10 @@ func (c *MemoryCache) readDump(r io.Reader) (int, error) {
 				return fmt.Errorf("failed to decode dns msg, %w", err)
 			}
 
-			i := &item{
-				resp:           resp,
-				storedTime:     storedTime,
-				expirationTime: msgExpTime,
+			i := &cache.Item{
+				Resp:           resp,
+				StoredTime:     storedTime,
+				ExpirationTime: msgExpTime,
 			}
 			c.backend.Store(key(entry.GetKey()), i, time.Now().Sub(cacheExpTime))
 		}

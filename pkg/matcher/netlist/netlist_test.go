@@ -116,3 +116,46 @@ func TestIPNetList_New_And_Contains(t *testing.T) {
 		})
 	}
 }
+
+func Test_Contains(t *testing.T) {
+	raw := `
+173.245.48.0/20
+103.21.244.0/22
+103.22.200.0/22
+103.31.4.0/22
+141.101.64.0/18
+108.162.192.0/18
+190.93.240.0/20
+188.114.96.0/20
+197.234.240.0/22
+198.41.128.0/17
+162.158.0.0/15
+104.16.0.0/13
+104.24.0.0/14
+172.64.0.0/13
+131.0.72.0/22
+`
+
+	ipNetList := NewList()
+	err := LoadFromReader(ipNetList, bytes.NewBufferString(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ipNetList.Sort()
+
+	tests := []struct {
+		name   string
+		testIP netip.Addr
+		want   bool
+	}{
+		{"", netip.MustParseAddr("104.21.51.61"), true},
+	}
+	for _, tt := range tests {
+		match := ipNetList.Match(tt.testIP)
+		t.Run(tt.name, func(tx *testing.T) {
+			if got := ipNetList.Match(tt.testIP); got != tt.want {
+				t.Errorf("IPNetList.Match() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

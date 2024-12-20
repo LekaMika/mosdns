@@ -110,7 +110,6 @@ func StartServer(bp *coremain.BP, args *Args) (*HttpServer, error) {
 
 	if listenerNetwork == "unix" {
 		// 清理sockfile
-		os.Remove(args.Listen)
 		s := make(chan os.Signal, 1)
 		signal.Notify(s, os.Interrupt, syscall.SIGTERM)
 		go func() {

@@ -17,12 +17,18 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package redis_cache
+package redis_cache_backend
 
-//import (
-//	"testing"
-//)
-//
+import (
+	"fmt"
+	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
+	"github.com/redis/go-redis/v9"
+	"testing"
+	"time"
+)
+
+var _ cache_backend.CacheBackend[cache_backend.StringKey, string] = (*RedisCache[cache_backend.StringKey, string])(nil)
+
 //func BenchmarkUnmarshalDNS(b *testing.B) {
 //	rawBytes := `{"Resp":{"Id":6733,"Response":true,"Opcode":0,"Authoritative":false,"Truncated":false,"RecursionDesired":true,"RecursionAvailable":true,"Zero":false,"AuthenticatedData":false,"CheckingDisabled":false,"Rcode":0,"Question":[{"Name":"www.qq.com.","Qtype":1,"Qclass":1}],"Answer":[{"Hdr":{"Name":"www.qq.com.","Rrtype":5,"Class":1,"Ttl":300,"Rdlength":36},"Target":"ins-r23tsuuf.ias.tencent-cloud.net."},{"Hdr":{"Name":"ins-r23tsuuf.ias.tencent-cloud.net.","Rrtype":1,"Class":1,"Ttl":300,"Rdlength":4},"A":"61.241.54.232"},{"Hdr":{"Name":"ins-r23tsuuf.ias.tencent-cloud.net.","Rrtype":1,"Class":1,"Ttl":300,"Rdlength":4},"A":"61.241.54.211"}],"Ns":[],"Extra":[]},"StoredTime":"2024-08-09T09:28:35.365373551+08:00","ExpirationTime":"2024-08-09T09:33:35.365373551+08:00"}`
 //	b.ResetTimer()
@@ -30,3 +36,30 @@ package redis_cache
 //		unmarshalDNS([]byte(rawBytes))
 //	}
 //}
+
+func TestRedisCache_Get(t *testing.T) {
+	url := "unix:///dev/shm/redis.sock?db=1"
+	c, err := NewRedisCache(url)
+	if err != nil {
+		t.Fatal(fmt.Errorf("invalid redis url, %w", err))
+	}
+	v, d, ok := c.Get("test_query_cache:A:IN:qq.com.")
+	if !ok {
+		t.Fatal(fmt.Errorf("get faild"))
+	}
+	fmt.Printf("%v - > %v", v, d)
+}
+
+func TestRedisCache_Store(t *testing.T) {
+	url := "unix:///dev/shm/redis.sock?db=1"
+	opt, err := redis.ParseURL(url)
+	if err != nil {
+		t.Fatal(fmt.Errorf("invalid redis url, %w", err))
+	}
+	opt.MaxRetries = -1
+	c, err := NewRedisCache(url)
+	if err != nil {
+		t.Fatal(fmt.Errorf("invalid redis url, %w", err))
+	}
+	c.Store("test_query_cache:A:IN:qq.com.", "test", time.Minute*2)
+}

@@ -23,7 +23,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/IrineSistiana/mosdns/v5/coremain"
-	"github.com/IrineSistiana/mosdns/v5/pkg/cache"
+	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
+	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend/memory_cache_backend"
 	"github.com/IrineSistiana/mosdns/v5/pkg/dnsutils"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/pkg/utils"
@@ -59,7 +60,7 @@ func (a *Args) init() {
 
 type ReverseLookup struct {
 	args *Args
-	c    cache.Cache[key, string]
+	c    cache_backend.CacheBackend[key, cache_backend.StringValue]
 }
 
 func Init(bp *coremain.BP, args any) (any, error) {
@@ -68,7 +69,7 @@ func Init(bp *coremain.BP, args any) (any, error) {
 
 func NewReverseLookup(bp *coremain.BP, args *Args) (any, error) {
 	args.init()
-	c := cache.NewMemoryCache[key, string](cache.MemoryCacheOpts{Size: args.Size})
+	c := memory_cache_backend.NewMemoryCache[key, cache_backend.StringValue](memory_cache_backend.MemoryCacheOpts{Size: args.Size})
 	//c, err := cacheKey
 	//if err != nil {
 	//	return nil, fmt.Errorf("failed to init reverse_lookup redis cache, %w", err)
@@ -119,7 +120,7 @@ func (p *ReverseLookup) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (p *ReverseLookup) lookup(n netip.Addr) string {
+func (p *ReverseLookup) lookup(n netip.Addr) cache_backend.StringValue {
 	v, _, _ := p.c.Get(key(as16(n)))
 	return v
 }
@@ -144,7 +145,7 @@ func (p *ReverseLookup) ResponsePTR(q *dns.Msg) *dns.Msg {
 					Class:  question.Qclass,
 					Ttl:    5,
 				},
-				Ptr: fqdn,
+				Ptr: string(fqdn),
 			})
 			return r
 		}
@@ -181,7 +182,7 @@ func (p *ReverseLookup) saveIPs(q, r *dns.Msg) {
 		if len(q.Question) == 1 {
 			name = q.Question[0].Name
 		}
-		p.c.Store(key(as16(addr)), name, time.Duration(p.args.TTL)*time.Second)
+		p.c.Store(key(as16(addr)), cache_backend.StringValue(name), time.Duration(p.args.TTL)*time.Second)
 	}
 }
 

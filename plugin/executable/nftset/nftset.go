@@ -21,6 +21,7 @@ package nftset
 
 import (
 	"fmt"
+	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
 	"strconv"
 	"strings"
@@ -29,6 +30,7 @@ import (
 const PluginType = "nftset"
 
 func init() {
+	coremain.RegNewPluginFunc(PluginType, Init, func() any { return new(Args) })
 	sequence.MustRegExecQuickSetup(PluginType, QuickSetup)
 }
 
@@ -44,6 +46,10 @@ type SetArgs struct {
 	Table       string `yaml:"table_name"`
 	Set         string `yaml:"set_name"`
 	Mask        int    `yaml:"mask"`
+}
+
+func Init(bp *coremain.BP, args any) (any, error) {
+	return newNftSetPlugin(args.(*Args))
 }
 
 // QuickSetup format: [{ip|ip6|inet},table_name,set_name,{ipv4_addr|ipv6_addr},mask] *2 (can repeat once)

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022, IrineSistiana
+ * Copyright (C) 2024, Vizaxe
  *
  * This file is part of mosdns.
  *
@@ -17,22 +17,27 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package reverselookup
+package cache
 
 import (
-	"hash/maphash"
-	"net/netip"
+	"github.com/miekg/dns"
+	"time"
 )
 
-type key netip.Addr
+type Cache[K interface{}, V interface{}] interface {
+	Get(key K) V
+	Store(key K, value V, ttl time.Duration)
 
-var seed = maphash.MakeSeed()
+	QueryDns(q *dns.Msg) (*dns.Msg, bool)
+	StoreDns(q *dns.Msg, r *dns.Msg)
 
-func (k key) Sum() uint64 {
-	b := netip.Addr(k).As16()
-	return maphash.Bytes(seed, b[:])
+	Close() error
+	Clean() error
 }
 
-func (k key) CacheBackendKeySum() uint64 {
-	return k.Sum()
+type Item struct {
+	Resp           *dns.Msg
+	BlockHoleTag   string
+	StoredTime     time.Time
+	ExpirationTime time.Time
 }

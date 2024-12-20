@@ -34,6 +34,19 @@ const (
 	IP6arpa = ".ip6.arpa."
 )
 
+func Ip2PtrFqdn(addr netip.Addr) (fqdn string) {
+	if addr.Is4() {
+		d := addr.String() + IP4arpa
+		reverse, _ := ParsePTRQName(d)
+		fqdn = reverse.String() + IP4arpa
+	} else if addr.Is6() {
+		d := addr.String() + IP6arpa
+		reverse, _ := ParsePTRQName(d)
+		fqdn = reverse.String() + IP6arpa
+	}
+	return
+}
+
 // ParsePTRQName returns the ip that a PTR query name contains.
 func ParsePTRQName(fqdn string) (netip.Addr, error) {
 	switch {

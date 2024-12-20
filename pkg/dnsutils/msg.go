@@ -49,6 +49,31 @@ func GetMinimalTTL(m *dns.Msg) uint32 {
 	return minTTL
 }
 
+// GetMaximalTTL returns the maximal ttl of this msg.
+// If msg m has no record, it returns 0.
+func GetMaximalTTL(m *dns.Msg) uint32 {
+	maxTTL := ^uint32(0)
+	hasRecord := false
+	for _, section := range [...][]dns.RR{m.Answer, m.Ns, m.Extra} {
+		for _, rr := range section {
+			hdr := rr.Header()
+			if hdr.Rrtype == dns.TypeOPT {
+				continue // opt record ttl is not ttl.
+			}
+			hasRecord = true
+			ttl := hdr.Ttl
+			if ttl > maxTTL {
+				maxTTL = ttl
+			}
+		}
+	}
+
+	if !hasRecord { // no ttl applied
+		return 0
+	}
+	return maxTTL
+}
+
 // SetTTL updates all records' ttl to ttl, except opt record.
 func SetTTL(m *dns.Msg, ttl uint32) {
 	for _, section := range [...][]dns.RR{m.Answer, m.Ns, m.Extra} {

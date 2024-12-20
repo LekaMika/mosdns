@@ -17,10 +17,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package cache
+package memory_cache
 
 import (
 	"bytes"
+	"github.com/IrineSistiana/mosdns/v5/plugin/executable/cache"
 	"github.com/miekg/dns"
 	"strconv"
 	"testing"
@@ -35,10 +36,10 @@ func Test_cachePlugin_Dump(t *testing.T) {
 
 	now := time.Now()
 	hourLater := now.Add(time.Hour)
-	v := &item{
-		resp:           resp,
-		storedTime:     now,
-		expirationTime: hourLater,
+	v := &cache.Item{
+		Resp:           resp,
+		StoredTime:     now,
+		ExpirationTime: hourLater,
 	}
 
 	// Fill the cache

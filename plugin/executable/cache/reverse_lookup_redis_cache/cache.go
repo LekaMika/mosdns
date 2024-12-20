@@ -22,9 +22,9 @@ package reverse_lookup_redis_cache
 import (
 	"context"
 	"fmt"
-	"github.com/IrineSistiana/mosdns/v5/pkg/cache"
+	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
+	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend/redis_cache_backend"
 	"github.com/miekg/dns"
-	"github.com/redis/go-redis/v9"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -74,7 +74,7 @@ type ReverseLookupRedisCache struct {
 	args *Args
 
 	logger       *zap.Logger
-	backend      cache.Cache[string, string]
+	backend      cache_backend.CacheBackend[cache_backend.StringKey, string]
 	lazyUpdateSF singleflight.Group
 	closeOnce    sync.Once
 	closeNotify  chan struct{}
@@ -82,10 +82,7 @@ type ReverseLookupRedisCache struct {
 }
 
 func Init(bp *coremain.BP, args any) (any, error) {
-	c, err := NewPtrRedisCache(args.(*Args), cache.RedisCacheOpts{
-		Logger:     bp.L(),
-		MetricsTag: bp.Tag(),
-	})
+	c, err := NewPtrRedisCache(args.(*Args), bp.Tag(), bp.L())
 	if err != nil {
 		return nil, err
 	}
@@ -94,27 +91,14 @@ func Init(bp *coremain.BP, args any) (any, error) {
 	return c, nil
 }
 
-func NewPtrRedisCache(args *Args, opts cache.RedisCacheOpts) (*ReverseLookupRedisCache, error) {
+func NewPtrRedisCache(args *Args, tag string, logger *zap.Logger) (*ReverseLookupRedisCache, error) {
 	args.init()
 
-	logger := opts.Logger
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	opt, err := redis.ParseURL(args.Url)
-	if err != nil {
-		return nil, fmt.Errorf("invalid redis url, %w", err)
-	}
-	opt.MaxRetries = -1
-	r := redis.NewClient(opt)
-	rcOpts := cache.RedisCacheOpts{
-		Client:        r,
-		ClientCloser:  r,
-		ClientTimeout: time.Duration(args.RedisTimeout) * time.Millisecond,
-		Logger:        logger,
-	}
 
-	backend, err := cache.NewRedisCache(rcOpts)
+	backend, err := redis_cache_backend.NewRedisCache[cache_backend.StringKey, string](args.Url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init redis cache, %w", err)
 	}
@@ -133,7 +117,7 @@ func (c *ReverseLookupRedisCache) Exec(ctx context.Context, qCtx *query_context.
 	question := q.Question[0]
 	qtype := question.Qtype
 	if qtype == dns.TypePTR {
-		r := c.handlePtr(q)
+		r, _ := c.QueryDns(q)
 		if r != nil {
 			qCtx.SetResponse(r)
 			return nil
@@ -144,37 +128,9 @@ func (c *ReverseLookupRedisCache) Exec(ctx context.Context, qCtx *query_context.
 
 	if !c.args.ReadOnly && (qtype == dns.TypeA || qtype == dns.TypeAAAA) {
 		if r := qCtx.R(); r != nil {
-			c.StorePtr(q, r)
+			c.StoreDns(q, r)
 		}
 	}
 
 	return err
-}
-
-func (c *ReverseLookupRedisCache) handlePtr(q *dns.Msg) *dns.Msg {
-	ptr, ok := c.GetPtr(q)
-	println(ptr)
-	if ok && len(ptr) > 0 {
-		r := new(dns.Msg)
-		setDefaultVal(r)
-		r.SetReply(q)
-		r.Answer = append(r.Answer, &dns.PTR{
-			Hdr: dns.RR_Header{
-				Name:   q.Question[0].Name,
-				Rrtype: q.Question[0].Qtype,
-				Class:  q.Question[0].Qclass,
-				Ttl:    5,
-			},
-			Ptr: ptr,
-		})
-		return r
-	}
-	return nil
-}
-
-func (c *ReverseLookupRedisCache) Close() error {
-	c.closeOnce.Do(func() {
-		close(c.closeNotify)
-	})
-	return c.backend.Close()
 }

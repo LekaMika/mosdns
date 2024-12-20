@@ -21,10 +21,11 @@ package dual_selector
 
 import (
 	"context"
+	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
+	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend/memory_cache_backend"
 	"io"
 	"time"
 
-	"github.com/IrineSistiana/mosdns/v5/pkg/cache"
 	"github.com/IrineSistiana/mosdns/v5/pkg/dnsutils"
 	"github.com/IrineSistiana/mosdns/v5/pkg/pool"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
@@ -59,7 +60,7 @@ type Selector struct {
 	sequence.BQ
 	prefer uint16 // dns.TypeA or dns.TypeAAAA
 
-	preferTypOkCache *cache.MemoryCache[key, bool]
+	preferTypOkCache *memory_cache_backend.MemoryCache[cache_backend.StringKey, cache_backend.BoolValue]
 }
 
 // Exec implements handler.Executable.
@@ -76,6 +77,7 @@ func (s *Selector) Exec(ctx context.Context, qCtx *query_context.Context, next s
 	}
 
 	qName := key(q.Question[0].Name)
+	fqdn := cache_backend.StringKey(qName)
 	if qtype == s.prefer {
 		err := next.ExecNext(ctx, qCtx)
 		if err != nil {
@@ -83,13 +85,13 @@ func (s *Selector) Exec(ctx context.Context, qCtx *query_context.Context, next s
 		}
 
 		if r := qCtx.R(); r != nil && msgAnsHasRR(r, s.prefer) {
-			s.preferTypOkCache.Store(qName, true, cacheTlt)
+			s.preferTypOkCache.Store(fqdn, true, cacheTlt)
 		}
 		return nil
 	}
 
 	// Qtype is not the preferred type.
-	preferredTypOk, _, _ := s.preferTypOkCache.Get(qName)
+	preferredTypOk, _, _ := s.preferTypOkCache.Get(fqdn)
 	if preferredTypOk {
 		// We know that domain has preferred type so this qtype can be blocked
 		// right away.
@@ -121,7 +123,7 @@ func (s *Selector) Exec(ctx context.Context, qCtx *query_context.Context, next s
 		}
 		if r := qCtx.R(); r != nil && msgAnsHasRR(r, s.prefer) {
 			// Target domain has preferred type.
-			s.preferTypOkCache.Store(qName, true, cacheTlt)
+			s.preferTypOkCache.Store(fqdn, true, cacheTlt)
 			close(shouldBlock)
 			return
 		}
@@ -187,7 +189,7 @@ func newSelector(bq sequence.BQ, preferType uint16) *Selector {
 	return &Selector{
 		BQ:               bq,
 		prefer:           preferType,
-		preferTypOkCache: cache.NewMemoryCache[key, bool](cache.MemoryCacheOpts{Size: cacheSize, CleanerInterval: cacheGcInterval}),
+		preferTypOkCache: memory_cache_backend.NewMemoryCache[cache_backend.StringKey, cache_backend.BoolValue](memory_cache_backend.MemoryCacheOpts{Size: cacheSize, CleanerInterval: cacheGcInterval}),
 	}
 }
 

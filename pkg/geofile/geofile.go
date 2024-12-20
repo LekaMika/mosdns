@@ -15,7 +15,8 @@ import (
 )
 
 func LoadIP(file, code string) ([]*router.CIDR, error) {
-	bs, err := readAsset(file)
+	//bs, err := readAsset(file)
+	bs, err := readAssetByCache(file)
 	if err != nil {
 		return nil, err
 	}

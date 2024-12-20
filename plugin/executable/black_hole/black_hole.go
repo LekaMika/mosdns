@@ -20,38 +20,87 @@
 package black_hole
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
 	"github.com/miekg/dns"
+	"go.uber.org/zap"
 	"net/netip"
+	"os"
 	"strings"
 )
 
 const PluginType = "black_hole"
 
 func init() {
+	coremain.RegNewPluginFunc(PluginType, Init, func() any { return new(Args) })
 	sequence.MustRegExecQuickSetup(PluginType, QuickSetup)
 }
 
 var _ sequence.Executable = (*BlackHole)(nil)
 
+type Args struct {
+	Files []string `yaml:"files"`
+	Ips   []string `yaml:"ips"`
+}
+
 type BlackHole struct {
-	ipv4 []netip.Addr
-	ipv6 []netip.Addr
+	logger *zap.Logger
+	tag    string
+	ipv4   []netip.Addr
+	ipv6   []netip.Addr
+}
+
+func Init(bp *coremain.BP, args any) (any, error) {
+	return NewBlackHole(bp.L(), bp.Tag(), args.(*Args))
 }
 
 // QuickSetup format: [ipv4|ipv6] ...
 // Support both ipv4/a and ipv6/aaaa families.
-func QuickSetup(_ sequence.BQ, s string) (any, error) {
-	return NewBlackHole(strings.Fields(s))
+func QuickSetup(bq sequence.BQ, s string) (any, error) {
+	cutPrefix := func(s string, p string) (string, bool) {
+		if strings.HasPrefix(s, p) {
+			return strings.TrimPrefix(s, p), true
+		}
+		return s, false
+	}
+	args := new(Args)
+	for _, exp := range strings.Fields(s) {
+		//if tag, ok := cutPrefix(exp, "$"); ok {
+		//	args.DomainSets = append(args.DomainSets, tag)
+		//} else
+		if path, ok := cutPrefix(exp, "&"); ok {
+			args.Files = append(args.Files, path)
+		} else {
+			args.Ips = append(args.Ips, exp)
+		}
+	}
+	return NewBlackHole(bq.L(), "-", args)
 }
 
 // NewBlackHole creates a new BlackHole with given ips.
-func NewBlackHole(ips []string) (*BlackHole, error) {
-	b := &BlackHole{}
-	for _, s := range ips {
+func NewBlackHole(logger *zap.Logger, tag string, args *Args) (*BlackHole, error) {
+	b := &BlackHole{
+		logger: logger,
+		tag:    tag,
+	}
+
+	for _, s := range args.Files {
+		ips, err := loadFromFile(s)
+		if err != nil {
+			return nil, err
+		}
+		if ips != nil {
+			for _, ip := range ips {
+				args.Ips = append(args.Ips, ip)
+			}
+		}
+	}
+
+	for _, s := range args.Ips {
 		addr, err := netip.ParseAddr(s)
 		if err != nil {
 			return nil, fmt.Errorf("invalid ipv4 addr %s, %w", s, err)
@@ -65,10 +114,26 @@ func NewBlackHole(ips []string) (*BlackHole, error) {
 	return b, nil
 }
 
+func loadFromFile(f string) ([]string, error) {
+	if len(f) > 0 {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		return loadFromReader(bytes.NewReader(b))
+	}
+	return nil, fmt.Errorf("file not found")
+}
+
 // Exec implements sequence.Executable. It set a response with given ips if
 // query has corresponding qtypes.
 func (b *BlackHole) Exec(_ context.Context, qCtx *query_context.Context) error {
 	if r := b.Response(qCtx.Q()); r != nil {
+		b.logger.Info("result change", zap.Any("query", qCtx), zap.Any("resp", r))
+		if or := qCtx.R(); or != nil {
+			qCtx.SetBlackHoleOrigResp(or)
+		}
+		qCtx.SetBlackHoleTag(b.tag)
 		qCtx.SetResponse(r)
 	}
 	return nil

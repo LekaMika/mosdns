@@ -53,6 +53,25 @@ type Context struct {
 	// lazy init.
 	kv    map[uint32]any
 	marks map[uint32]struct{}
+
+	blackHoleTag      string
+	blackHoleOrigResp *dns.Msg
+}
+
+func (ctx *Context) SetBlackHoleTag(tag string) {
+	ctx.blackHoleTag = tag
+}
+
+func (ctx *Context) GetBlackHoleTag() string {
+	return ctx.blackHoleTag
+}
+
+func (ctx *Context) SetBlackHoleOrigResp(r *dns.Msg) {
+	ctx.blackHoleOrigResp = r
+}
+
+func (ctx *Context) GetBlackHoleOrigResp() *dns.Msg {
+	return ctx.blackHoleOrigResp
 }
 
 var contextUid atomic.Uint32

@@ -4,7 +4,7 @@
 // 	protoc        v4.24.3
 // source: plugin/executable/cache/dump.proto
 
-package cache
+package memory_cache
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
